@@ -1,2 +1,4 @@
-# openhexa-templates-ds
-Repository of OpenHEXA pipeline templates maintained by Bluesquare Data Services team.
+# OpenHEXA Pipeline Templates
+
+A collection of OpenHEXA pipeline templates created and maintained by Bluesquare Data Services team.
+
