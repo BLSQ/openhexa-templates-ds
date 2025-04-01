@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 from math import ceil
 from pathlib import Path
@@ -233,8 +233,8 @@ def download(
         current_run.log_error(msg)
         raise ValueError(msg)
 
-    start = datetime.strptime(start, "%Y-%m-%d").astimezone(timezone.utc)
-    end = datetime.strptime(end, "%Y-%m-%d").astimezone(timezone.utc)
+    start = datetime.strptime(start, "%Y-%m-%d").astimezone(UTC)
+    end = datetime.strptime(end, "%Y-%m-%d").astimezone(UTC)
 
     dst_dir = output_dir / variable
     dst_dir.mkdir(parents=True, exist_ok=True)
