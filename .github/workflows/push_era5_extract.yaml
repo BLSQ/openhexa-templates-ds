@@ -1,0 +1,36 @@
+name: Push era5_extract pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/push_era5_extract.yaml"
+      - "era5_extract/**"
+      - "!era5_extract/docs/**"
+      - "!era5_extract/README.md"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.11'
+      
+      - name: Configure OpenHEXA CLI
+        uses: blsq/openhexa-cli-action@v1
+        with:
+          workspace: "ds-templates"
+          token: ${{ secrets.OH_TOKEN }}
+
+      - name: Push pipeline to OpenHEXA
+        run: |
+          openhexa pipelines push era5_extract \
+            --description ${{ github.event.head_commit.message }} \
+            --link "https://github.com/BLSQ/openhexa-templates-ds/commit/${{ github.sha }}" \
+            --yes
