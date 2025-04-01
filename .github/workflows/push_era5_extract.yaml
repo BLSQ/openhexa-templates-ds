@@ -32,6 +32,6 @@ jobs:
         run: |
           openhexa pipelines push era5_extract \
             --code "era5-extract" \
-            --description "${{ github.event.head_commit.message }}"" \
+            --description "${{ github.event.head_commit.message }}" \
             --link "https://github.com/BLSQ/openhexa-templates-ds/commit/${{ github.sha }}" \
             --yes
