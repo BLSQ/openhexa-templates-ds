@@ -31,6 +31,6 @@ jobs:
       - name: Push pipeline to OpenHEXA
         run: |
           openhexa pipelines push era5_import_dhis2 \
-            --description ${{ github.event.head_commit.message }} \
+            --description "${{ github.event.head_commit.message }}" \
             --link "https://github.com/BLSQ/openhexa-templates-ds/commit/${{ github.sha }}" \
             --yes
