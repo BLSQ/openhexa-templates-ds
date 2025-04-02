@@ -29,7 +29,7 @@ from openhexa.toolbox.era5.cds import CDS, VARIABLES
 @parameter(
     "end_date",
     type=str,
-    name="End date",
+    name="Ending date",
     help="End date of extraction period. Latest available by default.",
     required=False,
 )
