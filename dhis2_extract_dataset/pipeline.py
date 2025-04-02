@@ -1,38 +1,49 @@
 """Template for newly generated pipelines."""
-from urllib.parse import urlparse
-from openhexa.sdk import (
-    workspace,
-    current_run,
-    pipeline,
-    parameter,
-    Dataset,
-    DHIS2Connection,
-)
 
 import os
-import pandas as pd
-from typing import List
 from datetime import date
-from openhexa.toolbox.dhis2 import DHIS2
-from openhexa.sdk import current_run, pipeline
+from typing import List
+from urllib.parse import urlparse
 
+import pandas as pd
 from helper import (
-    select_data_elements,
-    get_levels,
-    get_periods_with_no_data,
-    get_dataelements_with_no_data,
-    add_to_dataset,
+    # add_parents,
+    # add_to_dataset,
     datasets_temp,
+    get_dataelements_with_no_data,
+    get_levels,
+    # get_orgunits_with_parents,
+    get_periods_with_no_data,
     is_iso_date,
-    get_orgunits_with_parents,
-    add_parents,
     isodate_to_period_type,
+    select_data_elements,
 )
+from openhexa.sdk import (
+    Dataset,
+    DHIS2Connection,
+    current_run,
+    parameter,
+    pipeline,
+    workspace,
+)
+from openhexa.toolbox.dhis2 import DHIS2
+
+
 @pipeline("dhis2_extract_dataset")
 @parameter(
-    "dhis_con", name="DHIS2 Connection", type=DHIS2Connection, default="dhis2-demo-2-41", required=True
+    "dhis_con",
+    name="DHIS2 Connection",
+    type=DHIS2Connection,
+    default="dhis2-demo-2-41",
+    required=True,
 )
-@parameter("data_element_ids", type=str, multiple=True, required=False, default=["FvKdfA2SuWI","p1MDHOT6ENy"])
+@parameter(
+    "data_element_ids",
+    type=str,
+    multiple=True,
+    required=False,
+    default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
+)
 @parameter(
     "start",
     name="Start Date (ISO format)",
@@ -57,11 +68,12 @@ from helper import (
     required=True,
     default=True,
 )
-@parameter("datasets_ids", type=str, multiple=True, default = ["TuL8IOPzpHh"], required=True)
+@parameter("datasets_ids", type=str, multiple=True, default=["TuL8IOPzpHh"], required=True)
 @parameter("add_dx_name", type=bool, required=False, default=False)
 @parameter("add_coc_name", type=bool, required=False, default=False)
 @parameter("add_org_unit_parent", type=bool, required=False, default=False)
-def dhis2_extract_dataset(dhis_con,
+def dhis2_extract_dataset(
+    dhis_con,
     datasets_ids,
     data_element_ids,
     start,
@@ -91,11 +103,11 @@ def dhis2_extract_dataset(dhis_con,
         dhis, dhis2_name, ous, table, add_dx_name, add_org_unit_parent, add_coc_name
     )
     warning_post_extraction(table, ds, datasets_ids, start, end)
-    save_table(table, dhis_con)
+    save_table(table, dhis2_name)
 
 
 @dhis2_extract_dataset.task
-def get_dhis2_name_domain(dhis_con):
+def get_dhis2_name_domain(dhis_con) -> str:
     subdomain = urlparse(dhis_con.url).netloc.split(".")[0]
     return f"{subdomain.replace('-', '_')}"
 
@@ -111,14 +123,15 @@ def create_extraction_folder(dhis2_name, save_by_month, ds, ids):
 
 
 @dhis2_extract_dataset.task
-def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:
-    """
-    Creates and returns a DHIS2 object using the provided DHIS2Connection.
+def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:  # noqa: D417
+    """Creates and returns a DHIS2 object using the provided DHIS2Connection.
 
-    Parameters:
+    Parameters
+    ----------
         dhis_con (DHIS2Connection): The DHIS2Connection object to use for creating the DHIS2 object.
 
-    Returns:
+    Returns
+    -------
         DHIS2: The created DHIS2 object.
 
     """
@@ -128,26 +141,22 @@ def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:
 @dhis2_extract_dataset.task
 def save_table(
     table: pd.DataFrame,
-    dhis_con: DHIS2Connection,
+    dhis2_name: str,
 ):
-    """
-    Saves the given table to DHIS2 and optionally to the OH database.
+    """Saves the given table to DHIS2 and optionally to the OH database.
 
     Args:
         table (pd.DataFrame): The table to be saved.
         dhis_con (DHIS2Connection): The DHIS2 connection object.
         openhexa_dataset (Dataset): The OpenHexa dataset object.
         save_in_db (bool): Whether to save the table in the OH database.
-
-    Returns:
-        None
     """
-    table.to_csv(f"{workspace.files_path}/dataset_extraction.csv", index=False)
+    table.to_csv(f"{workspace.files_path}/{dhis2_name}/dataset_extraction.csv", index=False)
+
 
 @dhis2_extract_dataset.task
 def warning_post_extraction(table, datasets, ids, start, end):
-    """
-    Check for warnings in the extracted data.
+    """Check for warnings in the extracted data.
 
     Args:
         table (pd.DataFrame): The extracted data.
@@ -165,6 +174,7 @@ def warning_post_extraction(table, datasets, ids, start, end):
         for id in ids:
             get_periods_with_no_data(periods, start, end, datasets[id])
             get_dataelements_with_no_data(table["dx"].unique(), datasets[id])
+
 
 @dhis2_extract_dataset.task
 def warning_request(ids, datasets, data_element_ids, ous):
@@ -358,6 +368,7 @@ def enrich_data(
             # table = add_parents(table, ous)
 
     return table
+
 
 if __name__ == "__main__":
     dhis2_extract_dataset()
