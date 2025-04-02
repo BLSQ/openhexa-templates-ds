@@ -1,25 +1,26 @@
-from datetime import datetime
-import tempfile
-from typing import List
-import os
-import polars as pl
-import pandas as pd
-import geopandas as gpd
-from urllib.parse import urlparse
-from openhexa.sdk import current_run, workspace, Dataset
-from openhexa.toolbox.dhis2 import DHIS2
-from openhexa.toolbox.dhis2.periods import period_from_string, Period
 import json
+import tempfile
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
+
+import geopandas as gpd
+import pandas as pd
+import polars as pl
+from openhexa.sdk import Dataset, current_run, workspace
+from openhexa.toolbox.dhis2 import DHIS2
+from openhexa.toolbox.dhis2.periods import Period, period_from_string
 
 
 def is_iso_date(date_str: str) -> bool:
-    """
-    Check if a given string is a valid ISO 8601 date.
+    """Check if a given string is a valid ISO 8601 date.
 
-    Parameters:
-    date_str (str): The string to be checked.
+    Args:
+    ----
+    date_str (str): A string representing the date to be checked in ISO 8601 format.
 
     Returns:
+    -------
     bool: True if the string is a valid ISO 8601 date, False otherwise.
     """
     try:
@@ -31,9 +32,8 @@ def is_iso_date(date_str: str) -> bool:
         return False
 
 
-def get_week_as_DHIS2(date):
-    """
-    Converts a given date to the DHIS2 week format.
+def get_week_as_dhis2(date: str) -> str:
+    """Converts a given date to the DHIS2 week format.
 
     Args:
         date (str): The date in the format 'YYYY-MM-DD'.
@@ -46,13 +46,13 @@ def get_week_as_DHIS2(date):
     return f"{date_y}W{week_number}"
 
 
-def isodate_to_period_type(date: str, periodType: str) -> Period:
-    """
-    Converts a given date to the specified period type.
+def isodate_to_period_type(date: str, period_type: str) -> Period:
+    """Converts a given date to the specified period type.
 
     Args:
         date (str): The input date in ISO format (YYYY-MM-DD).
-        periodType (str): The desired period type. Valid options are "Monthly", "Yearly", "Quarterly", "Weekly", and "Daily".
+        period_type (str): The desired period type. Valid options are "Monthly", "Yearly",
+        "Quarterly", "Weekly", and "Daily".
 
     Returns:
         str: The converted date in the specified period type format.
@@ -61,19 +61,19 @@ def isodate_to_period_type(date: str, periodType: str) -> Period:
         ValueError: If an invalid period type is provided.
 
     """
-    if periodType == "Monthly":
+    if period_type == "Monthly":
         date = datetime.strptime(date, "%Y-%m-%d").strftime("%Y%m")
-    elif periodType == "Yearly":
+    elif period_type == "Yearly":
         date = datetime.strptime(date, "%Y-%m-%d").strftime("%Y")
-    elif periodType == "Quarterly":
+    elif period_type == "Quarterly":
         date = (
             datetime.strptime(date, "%Y-%m-%d").strftime("%Y")
             + "Q"
             + str((datetime.strptime(date, "%Y-%m-%d").month - 1) // 3 + 1)
         )
-    elif periodType == "Weekly":
-        date = get_week_as_DHIS2(date)
-    elif periodType == "Daily":
+    elif period_type == "Weekly":
+        date = get_week_as_dhis2(date)
+    elif period_type == "Daily":
         date = datetime.strptime(date, "%Y-%m-%d").strftime("%Y%m%d")
     else:
         raise ValueError("Invalid period type provided.")
@@ -82,10 +82,9 @@ def isodate_to_period_type(date: str, periodType: str) -> Period:
 
 
 def get_periods_with_no_data(
-    retrieve_periods: List[str], start: str, end: str, dataset: dict
-) -> List[str]:
-    """
-    Get the periods with no data associated.
+    retrieve_periods: list[str], start: str, end: str, dataset: dict
+) -> list[str]:
+    """Get the periods with no data associated.
 
     Args:
         retrieve_periods (List[str]): List of periods with data.
@@ -96,10 +95,10 @@ def get_periods_with_no_data(
     Returns:
         List[str]: List of periods with no data associated.
     """
-    periodType = dataset["periodType"]
+    period_type = dataset["periodType"]
     dataset_name = dataset["name"]
-    start = isodate_to_period_type(start, periodType)
-    end = isodate_to_period_type(end, periodType)
+    start = isodate_to_period_type(start, period_type)
+    end = isodate_to_period_type(end, period_type)
     if start != end:
         excepted_periods = start.get_range(end)
     else:
@@ -108,14 +107,14 @@ def get_periods_with_no_data(
     missing_periods = [p for p in excepted_periods if p not in retrieve_periods]
     if len(missing_periods) > 0:
         current_run.log_warning(
-            f"The following periods have no data associated: {missing_periods} for dataset {dataset_name}"
+            f"The following periods have no data associated: {missing_periods} \
+                for dataset {dataset_name}"
         )
     return missing_periods
 
 
-def get_dataelements_with_no_data(retrieve_dataelements: List[str], dataset: dict):
-    """
-    Returns a list of data elements that are expected but not found in the retrieved data.
+def get_dataelements_with_no_data(retrieve_dataelements: list[str], dataset: dict) -> list[str]:
+    """Returns a list of data elements that are expected but not found in the retrieved data.
 
     Args:
         retrieve_dataelements (List[str]): A list of data elements retrieved from a source.
@@ -129,25 +128,24 @@ def get_dataelements_with_no_data(retrieve_dataelements: List[str], dataset: dic
     missing_dataelements = [dx for dx in expected_data_elements if dx not in retrieve_dataelements]
     if len(missing_dataelements) > 0:
         current_run.log_warning(
-            f"The following data elements have no data associated: {missing_dataelements} for dataset {dataset_name}"
+            f"The following data elements have no data associated: {missing_dataelements}\
+                for dataset {dataset_name}"
         )
     return missing_dataelements
 
 
 # add the data to the dataset
 def add_to_dataset(table: pd.DataFrame, dhis2_connection: DHIS2, dataset: Dataset):
-    """
-    Adds the given table data to a dataset in DHIS2.
+    """Adds the given table data to a dataset in DHIS2.
 
     Args:
         table (pd.DataFrame): The table data to be added to the dataset.
         dhis2_connection (DHIS2): The DHIS2 connection object.
         dataset (Dataset): The dataset object to which the data will be added.
 
-    Returns:
-        None
     """
-    # we do not have access to the connection slug, so we use the url sub-domain instead.. for the moment
+    # we do not have access to the connection slug, so we use the url sub-domain instead..
+    # for the moment
     subdomain = urlparse(dhis2_connection.url).netloc.split(".")[0]
     dataset_name = f"{subdomain.replace('-', '_')}_dataset_extraction"
     if dataset is None:
@@ -157,9 +155,8 @@ def add_to_dataset(table: pd.DataFrame, dhis2_connection: DHIS2, dataset: Datase
     add_data_to_dataset(data=table, dataset=dataset, fname=dataset_name, extension="csv")
 
 
-def search_dataset(dataset_name: str):
-    """
-    Searches for a dataset with the given name in the workspace.
+def search_dataset(dataset_name: str) -> Dataset | None:
+    """Searches for a dataset with the given name in the workspace.
 
     Args:
         dataset_name (str): The name of the dataset to search for.
@@ -175,11 +172,13 @@ def search_dataset(dataset_name: str):
     return dataset
 
 
-def add_data_to_dataset(data, dataset: Dataset, fname: str, extension: str = "csv"):
-    """
-    Add files to a dataset by creating a new version
-    """
-
+def add_data_to_dataset(
+    data: pd.DataFrame | gpd.GeoDataFrame | pl.DataFrame,
+    dataset: Dataset,
+    fname: str,
+    extension: str = "csv",
+):
+    """Add files to a dataset by creating a new version."""
     try:
         if isinstance(data, pd.DataFrame):
             df = data
@@ -212,48 +211,54 @@ def add_data_to_dataset(data, dataset: Dataset, fname: str, extension: str = "cs
             f"File {fname}.{extension} saved in new dataset version: {dataset_version_name}"
         )
     except Exception as e:
-        raise Exception(f"Error while saving the dataset version: {e}")
+        raise Exception(f"Error while saving the dataset version: {e}") from e
 
 
-def select_data_elements(data_element_ids, data_elements):
-    """
-    Selects the data elements from the given list of data_element_ids that are present in the data_elements list.
+def select_data_elements(data_element_ids: list[str], data_elements: list[str]) -> list[str] | None:
+    """Returns the data elements from data_element_ids that are present in data_elements.
 
     Args:
-        data_element_ids (list): A list of data element IDs.
-        data_elements (list): Another list of data elements IDs.
+    ----
+    data_element_ids (list[str]): A list of data element IDs.
+    data_elements (list[str]): Another list of data elements IDs.
 
     Returns:
-        list or None: A list of selected data elements IDs if data_element_ids is not empty and contains valid data element IDs,
-                     None otherwise.
+    -------
+    list[str] | None: A list of selected data elements IDs if data_element_ids is not empty
+    and contains valid data element IDs, None otherwise.
     """
     if data_element_ids:
         return [dx for dx in data_element_ids if dx in data_elements]
-    else:
-        return None
+    return None
 
 
-def get_levels(ous, orgunit_ids):
-    """
-    Returns a dictionary mapping the levels of the given orgunits to their IDs.
+def get_levels(ous: list[dict], orgunit_ids: dict[str, str]) -> dict[int, str]:
+    """Returns a dictionary mapping the levels of the given orgunits to their IDs.
 
-    Parameters:
-    - ous (list): A list of orgunits.
-    - orgunit_ids (list): A list of orgunit IDs.
+    Args:
+    ----
+    ous (list[dict]): A list of organizational units, where each unit is represented as
+    a dictionary.
+    orgunit_ids (dict[str, str]): A dictionary of organizational unit IDs.
 
     Returns:
-    - dict: A dictionary mapping the levels of the orgunits to their IDs.
+    -------
+    dict[int, str]: A dictionary mapping the levels of the orgunits to their IDs.
     """
     return {ou["level"]: ou["id"] for ou in ous if ou["id"] in orgunit_ids}
 
 
-def datasets_temp(dhis: DHIS2, dhis2_name: str) -> List[dict]:
+def datasets_temp(dhis: DHIS2, dhis2_name: str) -> list[dict]:
     """Get datasets metadata.
 
-    Return
-    ------
-    list of dict
-        Id, name, data elements, indicators and org units of all datasets.
+    Args:
+    ----
+    dhis (DHIS2): The DHIS2 connection object.
+    dhis2_name (str): The name of the DHIS2 connection.
+
+    Returns:
+    -------
+    list[dict] : list of dict Id, name, data elements, indicators and org units of all datasets.
     """
     datasets = {}
     for page in dhis.api.get_paged(
@@ -264,8 +269,8 @@ def datasets_temp(dhis: DHIS2, dhis2_name: str) -> List[dict]:
         },
     ):
         for ds in page["dataSets"]:
-            id = ds.get("id")
-            row = datasets.setdefault(id, {})
+            ds_id = ds.get("id")
+            row = datasets.setdefault(ds_id, {})
             row["name"] = ds.get("name")
             row["data_elements"] = [dx["dataElement"]["id"] for dx in ds["dataSetElements"]]
             row["indicators"] = [indicator["id"] for indicator in ds["indicators"]]
@@ -275,7 +280,18 @@ def datasets_temp(dhis: DHIS2, dhis2_name: str) -> List[dict]:
     return datasets
 
 
-def path_to_parents_ids(ou):
+def path_to_parents_ids(ou: dict) -> dict:
+    """Adds parent IDs and names to an organizational unit (OU) dictionary.
+
+    Args:
+    ----
+    ou (dict): A dictionary representing an organizational unit, containing at least "id", "name",
+    "level", and "path".
+
+    Returns:
+    -------
+    dict: The updated organizational unit dictionary with parent IDs and names added for each level.
+    """
     level = ou.get("level")
     ou[f"level_{level}_id"] = ou.get("id")
     ou[f"level_{level}_name"] = ou.get("name")
@@ -285,35 +301,55 @@ def path_to_parents_ids(ou):
     return ou
 
 
-def ous_to_dict(ous: List) -> dict:
-    """Convert a list of orgunits to a dictionary."""
+def ous_to_dict(ous: list) -> dict:
+    """Convert a list of orgunits to a dictionary.
+
+    Returns:
+        dict: A dictionary where keys are orgunit IDs and values are the corresponding orgunit
+        dictionaries.
+    """
     return {ou["id"]: ou for ou in ous}
 
 
-def find_name(ous: dict, id: str) -> str:
-    """Find the name of an orgunit by its ID."""
+def find_name(ous: dict, ou_id: str) -> str:
+    """Find the name of an orgunit by its ID.
+
+    Returns:
+        str: The name of the organizational unit if found, otherwise "unknown".
+    """
     try:
-        return ous.get(id)["name"]
+        return ous.get(ou_id)["name"]
     except KeyError:
-        current_run.log_warning(f"Not Found: {id}")
+        current_run.log_warning(f"Not Found: {ou_id}")
         return "unknown"
 
 
 def save_metadata(filename: str, dhis2_name: str, data: dict):
-    """Save metadata to a file."""
-    if not os.path.exists(f"{workspace.files_path}/{dhis2_name}/metadata"):
-        os.makedirs(f"{workspace.files_path}/{dhis2_name}/metadata")
-    with open(f"{workspace.files_path}/{dhis2_name}/metadata/{filename}.json", "w") as f:
+    """Save metadata to a JSON file.
+
+    Args:
+        filename (str): The name of the file to save the metadata.
+        dhis2_name (str): The name of the DHIS2 connection.
+        data (dict): The metadata to be saved.
+    """
+    if not Path(f"{workspace.files_path}/{dhis2_name}/metadata").exists():
+        Path(f"{workspace.files_path}/{dhis2_name}/metadata").mkdir(parents=True, exist_ok=True)
+    file_path = Path(f"{workspace.files_path}/{dhis2_name}/metadata/{filename}.json")
+    with file_path.open("w", encoding="utf-8") as f:
         f.write(json.dumps(data))
 
 
-def get_orgunits_with_parents(ous: List, dhis2_name: str) -> dict:
-    """
-    Processes a list of organizational units (OUs) and adds parent information to each OU.
+def get_orgunits_with_parents(ous: list, dhis2_name: str) -> dict:
+    """Processes a list of organizational units (OUs) and adds parent information to each OU.
+
     Args:
-        ous (list or dict): A list or dictionary of organizational units. Each OU should contain at least an "id" and "level".
+        ous (list or dict): A list or dictionary of organizational units. Each OU should contain at
+        least an "id" and "level".
+        dhis2_name (str): The name of the DHIS2 connection.
+
     Returns:
-        dict: A dictionary of organizational units with added parent information. Each OU will have additional keys for parent names at each level.
+        dict: A dictionary of organizational units with added parent information. Each OU will have
+        additional keys for parent names at each level.
     The function performs the following steps:
     1. Converts the input list of OUs to a dictionary if necessary.
     2. Iterates through each OU and adds parent information based on the OU's level.
@@ -321,31 +357,34 @@ def get_orgunits_with_parents(ous: List, dhis2_name: str) -> dict:
     4. Saves the updated metadata.
     5. Returns the updated dictionary of OUs.
     """
-
     ous_dict = ous_to_dict(ous)
     for ou in ous_dict.values():
-        ou = path_to_parents_ids(ou)
-        lvl = ou.get("level")
+        ou_path = path_to_parents_ids(ou)
+        lvl = ou_path.get("level")
         if lvl > 1:
             for upper_lvl in range(1, lvl):
-                parent_id = ou.get(f"level_{upper_lvl}_id")
-                ou[f"level_{upper_lvl}_name"] = find_name(ous_dict, parent_id)
+                parent_id = ou_path.get(f"level_{upper_lvl}_id")
+                ou_path[f"level_{upper_lvl}_name"] = find_name(ous_dict, parent_id)
     save_metadata("orgunits", dhis2_name, ous_dict)
     return ous_dict
 
 
 def add_parents(df: pd.DataFrame, parents: dict) -> pd.DataFrame:
-    """Add parent information to the DataFrame."""
+    """Add parent information to the DataFrame.
+
+    This function merges parent information from a dictionary into a DataFrame.
+
+    Returns:
+        pd.DataFrame: A DataFrame with added parent information.
+    """
     filtered_parents = {key: parents[key] for key in df["ou"] if key in parents}
     # Transform the `parents` dictionary into a DataFrame
     parents_df = pd.DataFrame.from_dict(filtered_parents, orient="index").reset_index()
 
     # Rename the index column to match the "ou" column
-    parents_df.rename(
+    parents_df = parents_df.rename(
         columns={"index": "ou"},
-        inplace=True,
     )
 
     # Join the DataFrame with the parents DataFrame on the "ou" column
-    result_df = df.merge(parents_df, on="ou", how="left")
-    return result_df
+    return df.merge(parents_df, on="ou", how="left")
