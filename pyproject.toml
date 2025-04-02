@@ -5,6 +5,7 @@ description = "OpenHEXA pipeline templates library maintained by Bluesquare Data
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "openhexa-toolbox>=2.0.0",
     "openhexa.sdk",
 ]
 
