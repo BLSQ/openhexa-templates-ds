@@ -1,8 +1,7 @@
 """Template for newly generated pipelines."""
 
-import os
 from datetime import date
-from typing import List
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -73,20 +72,21 @@ from openhexa.toolbox.dhis2 import DHIS2
 @parameter("add_coc_name", type=bool, required=False, default=False)
 @parameter("add_org_unit_parent", type=bool, required=False, default=False)
 def dhis2_extract_dataset(
-    dhis_con,
-    datasets_ids,
-    data_element_ids,
-    start,
-    end,
-    save_by_month,
-    openhexa_dataset,
-    add_dx_name,
-    add_org_unit_parent,
-    add_coc_name,
+    dhis_con: DHIS2Connection,
+    datasets_ids: list[str],
+    data_element_ids: list[str],
+    start: str,
+    end: str | None,
+    save_by_month: bool,
+    openhexa_dataset: Dataset | None,
+    add_dx_name: bool,
+    add_org_unit_parent: bool,
+    add_coc_name: bool,
 ):
     """Write your pipeline orchestration here.
 
-    Pipeline functions should only call tasks and should never perform IO operations or expensive computations.
+    Pipeline functions should only call tasks and should never perform IO operations or expensive
+    computations.
     """
     dhis = get_dhis(dhis_con)
     start = valid_date(start)
@@ -107,18 +107,41 @@ def dhis2_extract_dataset(
 
 
 @dhis2_extract_dataset.task
-def get_dhis2_name_domain(dhis_con) -> str:
+def get_dhis2_name_domain(dhis_con: DHIS2Connection) -> str:
+    """Extracts and formats the subdomain from a DHIS2 connection URL.
+
+    This function takes a DHIS2Connection object, parses its URL to extract the subdomain,
+    and replaces any hyphens ('-') in the subdomain with underscores ('_').
+
+    Args:
+        dhis_con (DHIS2Connection): An object containing the DHIS2 connection details,
+            including the URL.
+
+    Returns:
+        str: The formatted subdomain extracted from the DHIS2 connection URL.
+    """
     subdomain = urlparse(dhis_con.url).netloc.split(".")[0]
     return f"{subdomain.replace('-', '_')}"
 
 
 @dhis2_extract_dataset.task
-def create_extraction_folder(dhis2_name, save_by_month, ds, ids):
-    os.makedirs(f"{workspace.files_path}/{dhis2_name}", exist_ok=True)
+def create_extraction_folder(dhis2_name: str, save_by_month: bool, ds: dict, ids: list[str]) -> str:
+    """Creates a folder structure for data extraction.
+
+    Args:
+        dhis2_name (str): The name of the DHIS2 instance.
+        save_by_month (bool): Whether to save data by month.
+        ds (dict): A dictionary containing dataset information.
+        ids (list[str]): A list of dataset IDs.
+
+    Returns:
+        str: The name of the DHIS2 instance.
+    """
+    Path(f"{workspace.files_path}/{dhis2_name}").mkdir(parents=True, exist_ok=True)
     if save_by_month:
-        for id in ids:
-            name = ds[id]["name"]
-            os.makedirs(f"{workspace.files_path}/{dhis2_name}/{name}", exist_ok=True)
+        for i in ids:
+            name = ds[i]["name"]
+            Path(f"{workspace.files_path}/{dhis2_name}/{name}").mkdir(parents=True, exist_ok=True)
     return dhis2_name
 
 
@@ -147,39 +170,39 @@ def save_table(
 
     Args:
         table (pd.DataFrame): The table to be saved.
-        dhis_con (DHIS2Connection): The DHIS2 connection object.
-        openhexa_dataset (Dataset): The OpenHexa dataset object.
-        save_in_db (bool): Whether to save the table in the OH database.
+        dhis2_name (str): The name of the DHIS2 instance.
     """
     table.to_csv(f"{workspace.files_path}/{dhis2_name}/dataset_extraction.csv", index=False)
 
 
 @dhis2_extract_dataset.task
-def warning_post_extraction(table, datasets, ids, start, end):
+def warning_post_extraction(
+    table: pd.DataFrame, datasets: dict, ids: list[str], start: str, end: str
+):
     """Check for warnings in the extracted data.
 
     Args:
         table (pd.DataFrame): The extracted data.
         datasets (dict): Dictionary containing dataset information.
+        ids (list[str]): List of dataset IDs.
         start (str): Start date of the extraction.
         end (str): End date of the extraction.
 
-    Returns:
-        None
     """
     if len(table) == 0:
         current_run.log_warning("No data extracted")
     else:
         periods = [str(p) for p in table["pe"].unique()]
-        for id in ids:
-            get_periods_with_no_data(periods, start, end, datasets[id])
-            get_dataelements_with_no_data(table["dx"].unique(), datasets[id])
+        for i in ids:
+            get_periods_with_no_data(periods, start, end, datasets[i])
+            get_dataelements_with_no_data(table["dx"].unique(), datasets[i])
 
 
 @dhis2_extract_dataset.task
-def warning_request(ids, datasets, data_element_ids, ous):
-    """
-    Check for warnings in the datasets.
+def warning_request(
+    ids: list[str], datasets: dict, data_element_ids: list[str], ous: list[str]
+) -> set | None:
+    """Check for warnings in the datasets.
 
     Args:
         ids (list): List of dataset IDs.
@@ -191,8 +214,8 @@ def warning_request(ids, datasets, data_element_ids, ous):
         set or None: If `data_element_ids` is a non-empty list, returns a set of all data elements
         associated with the datasets that are not in `data_element_ids`. Otherwise, returns None.
     """
-    levels = {level for id in ids for level in get_levels(ous, datasets[id]["organisation_units"])}
-    frequencies = {datasets[id]["periodType"] for id in ids}
+    levels = {level for i in ids for level in get_levels(ous, datasets[i]["organisation_units"])}
+    frequencies = {datasets[i]["periodType"] for i in ids}
     if len(levels) > 1:
         current_run.log_warning(
             f"The orgunits associated to your datasets have mixed levels : {levels}"
@@ -203,19 +226,27 @@ def warning_request(ids, datasets, data_element_ids, ous):
         )
     print(data_element_ids, type(data_element_ids))
     if isinstance(data_element_ids, list) and len(data_element_ids) > 0:
-        all_data_elements = {dx for id in ids for dx in datasets[id]["data_elements"]}
+        all_data_elements = {dx for i in ids for dx in datasets[i]["data_elements"]}
         unmatched_data_elements = set(data_element_ids) - all_data_elements
         if len(unmatched_data_elements) > 0:
             current_run.log_error(
                 f"Data elements {unmatched_data_elements} are not associated to any dataset"
             )
         return all_data_elements - set(data_element_ids)
-    else:
-        return None
+    return None
 
 
 @dhis2_extract_dataset.task
 def get_datasets(dhis: DHIS2, dhis2_name: str) -> dict:
+    """Retrieves datasets metadata from the DHIS2 instance.
+
+    Args:
+        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
+        dhis2_name (str): The name of the DHIS2 instance.
+
+    Returns:
+        dict: A dictionary containing dataset metadata.
+    """
     try:
         ds = dhis.meta.datasets()
         assert isinstance(ds, dict)
@@ -228,9 +259,8 @@ def get_datasets(dhis: DHIS2, dhis2_name: str) -> dict:
 
 
 @dhis2_extract_dataset.task
-def get_ous(dhis: DHIS2) -> List[dict]:
-    """
-    Retrieves the organisation units from the DHIS instance.
+def get_ous(dhis: DHIS2) -> list[dict]:
+    """Retrieves the organisation units from the DHIS instance.
 
     Args:
         dhis: The DHIS instance.
@@ -242,9 +272,8 @@ def get_ous(dhis: DHIS2) -> List[dict]:
 
 
 @dhis2_extract_dataset.task
-def valid_date(date_str: str) -> str:
-    """
-    Validates a date string and returns it if valid, otherwise logs an error.
+def valid_date(date_str: str | None) -> str:
+    """Validates a date string and returns it if valid, otherwise logs an error.
 
     Args:
         date_str (str): The date string to validate.
@@ -255,61 +284,71 @@ def valid_date(date_str: str) -> str:
     """
     if date_str is None:
         return date.today().isoformat()
-    elif is_iso_date(date_str):
+    if is_iso_date(date_str):
         return date_str
-    else:
-        current_run.log_error(f"Invalid date format: {date_str}")
+    current_run.log_error(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
+    raise ValueError(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
 
 
 @dhis2_extract_dataset.task
 def extract_raw_data(
-    dhis, dhis2_name, save_by_month, datasets_ids, datasets, start, end, data_element_ids=None
-):
-    """
-    Extracts raw data from DHIS2 for the given datasets and time range.
+    dhis: DHIS2,
+    dhis2_name: str,
+    save_by_month: bool,
+    datasets_ids: list[str],
+    datasets: dict,
+    start: str,
+    end: str,
+    data_element_ids: list[str] | None = None,
+) -> pd.DataFrame:
+    """Extracts raw data from DHIS2 for the given datasets and time range.
 
-    Parameters:
-    - dhis: DHIS2 client object used to interact with the DHIS2 API.
-    - datasets_ids: List of dataset IDs to extract data from.
-    - datasets: Dictionary containing dataset information, including data elements and organisation units.
-    - start: Start date of the time range to extract data from.
-    - end: End date of the time range to extract data from.
-    - data_element_ids: Optional list of data element IDs to filter the extracted data. If None, all data elements will be included.
+    Args:
+        dhis (DHIS2): DHIS2 client object used to interact with the DHIS2 API.
+        dhis2_name (str): The name of the DHIS2 instance.
+        save_by_month (bool): Whether to save data by month.
+        datasets_ids (list[str]): List of dataset IDs to extract data from.
+        datasets (dict): Dictionary containing dataset information, including data elements and
+        organisation units.
+        start (str): Start date of the time range to extract data from.
+        end (str): End date of the time range to extract data from.
+        data_element_ids (list[str] | None): Optional list of data element IDs to filter the
+        extracted data. If None, all data elements will be included.
 
     Returns:
-    - res: Pandas DataFrame containing the extracted raw data, with additional columns for dataset name and period type.
+        pd.DataFrame: Pandas DataFrame containing the extracted raw data, with additional columns
+        for dataset name and period type.
     """
     res = pd.DataFrame()
-    for id in datasets_ids:
+    for ds_id in datasets_ids:
         selected_data_elements = select_data_elements(
-            data_element_ids, datasets[id]["data_elements"]
+            data_element_ids, datasets[ds_id]["data_elements"]
         )
-        periodType = datasets[id]["periodType"]
-        current_run.log_info(f"Extracting data for dataset {datasets[id]['name']}")
+        period_type = datasets[ds_id]["periodType"]
+        current_run.log_info(f"Extracting data for dataset {datasets[ds_id]['name']}")
         if save_by_month:
-            start = isodate_to_period_type(start, periodType)
-            end = isodate_to_period_type(end, periodType)
+            start = isodate_to_period_type(start, period_type)
+            end = isodate_to_period_type(end, period_type)
             for pe in start.get_range(end):
                 current_run.log_info(f"Extracting data for period {pe}")
-                # pe = str(pe)
-                if os.path.exists(
-                    f"{workspace.files_path}/{dhis2_name}/{datasets[id]['name']}/{pe}.csv"
-                ):
+                if Path(
+                    f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{pe}.csv"
+                ).exists():
                     df = pd.read_csv(
-                        f"{workspace.files_path}/{dhis2_name}/{datasets[id]['name']}/{pe}.csv"
+                        f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{pe}.csv"
                     )
                 else:
                     data_values = dhis.data_value_sets.get(
-                        datasets=[id],
+                        datasets=[ds_id],
                         data_elements=selected_data_elements,
-                        org_units=datasets[id]["organisation_units"],
+                        org_units=datasets[ds_id]["organisation_units"],
                         periods=[pe],
                     )
                     df = pd.DataFrame(data_values)
                     df["dataset"] = datasets[id]["name"]
-                    df["periodType"] = datasets[id]["periodType"]
+                    df["periodType"] = datasets[ds_id]["periodType"]
                     df.to_csv(
-                        f"{workspace.files_path}/{dhis2_name}/{datasets[id]['name']}/{pe}.csv",
+                        f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{pe}.csv",
                         index=False,
                     )
                     current_run.log_info(f"Data for period {pe} saved: {df.shape[0]} rows")
@@ -333,17 +372,18 @@ def extract_raw_data(
 def enrich_data(
     dhis: DHIS2,
     dhis2_name: str,
-    ous: List[dict],
+    ous: list[dict],
     table: pd.DataFrame,
     add_dx_name: bool,
     add_org_unit_parent: bool,
     add_coc_name: bool,
 ) -> pd.DataFrame:
-    """
-    Enriches the given table with additional columns based on the specified parameters.
+    """Enriches the given table with additional columns based on the specified parameters.
 
     Args:
         dhis (DHIS2): The DHIS2 object used for metadata retrieval.
+        dhis2_name (str): The name of the DHIS2 instance.
+        ous (list[dict]): A list of organisation units.
         table (pd.DataFrame): The table to be enriched.
         add_dx_name (bool): Whether to add the dx_name column.
         add_org_unit_parent (bool): Whether to add the org_unit_parent column.
@@ -352,7 +392,7 @@ def enrich_data(
     Returns:
         pd.DataFrame: The enriched table.
     """
-    table.rename(columns={"dataElement": "dx", "orgUnit": "ou", "period": "pe"}, inplace=True)
+    table = table.rename(columns={"dataElement": "dx", "orgUnit": "ou", "period": "pe"})
     print(table.columns)
     length_table = len(table)
     current_run.log_info("Length of the table is : " + str(length_table))
