@@ -1,7 +1,7 @@
-# ERA5 Extract
+# DHIS2 Shapes Extract
 
-The pipeline downloads ERA5-Land hourly data from the CDS and write the raw extracts to a directory
-in the OpenHEXA workspace.
+The pipeline downloads geometry data from DHIS2 instances and write a geopandas dataframe 
+extracts to a directory in the OpenHEXA workspace.
 
 ## Parameters
 
