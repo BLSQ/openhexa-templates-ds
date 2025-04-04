@@ -277,6 +277,7 @@ def _clean_temp_files(output_path: Path) -> None:
         if output_path.exists():
             output_path.unlink()
         output_path.parent.rmdir()
+        Path(workspace.files_path, "iaso-pipelines").rmdir()
     except OSError as err:
         current_run.log_warning(f"Temp file cleanup failed: {err}")
 
