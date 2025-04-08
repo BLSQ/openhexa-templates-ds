@@ -25,8 +25,9 @@ jobs:
       - name: Configure OpenHEXA CLI
         uses: blsq/openhexa-cli-action@v1
         with:
-          workspace: "ds-templates"
+          workspace: 'ds-templates'
           token: ${{ secrets.OH_TOKEN }}
+          openhexa_version: '2.1.1'
 
       - name: Push pipeline to OpenHEXA
         run: |
