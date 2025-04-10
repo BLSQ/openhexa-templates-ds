@@ -36,7 +36,7 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     connection="dhis_con",
     multiple=True,
     required=False,
-    default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
+    # default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
 )
 @parameter(
     "start",
@@ -54,7 +54,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=False,
     default=None,
 )
-@parameter("openhexa_dataset", name="Openhexa Dataset", type=Dataset, required=False, default=None)
 @parameter(
     "save_by_month",
     name="Store datasets values by period in the folder spaces",
@@ -65,10 +64,10 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
 @parameter(
     "datasets_ids",
     type=str,
-    multiple=True,
     widget=DHIS2Widget.DATASETS,
     connection="dhis_con",
-    default=["TuL8IOPzpHh"],
+    multiple=True,
+    # default=["TuL8IOPzpHh"],
     required=True,
 )
 @parameter("add_dx_name", type=bool, required=False, default=True)
@@ -81,7 +80,6 @@ def dhis2_extract_dataset(
     start: str,
     end: str | None,
     save_by_month: bool,
-    openhexa_dataset: Dataset | None,
     add_dx_name: bool,
     add_org_unit_parent: bool,
     add_coc_name: bool,
@@ -165,7 +163,7 @@ def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:  # noqa: D417
 
 
 @dhis2_extract_dataset.task
-def save_table(table: pd.DataFrame, dhis2_name: str, openhexa_dataset: Dataset | None = None):
+def save_table(table: pd.DataFrame, dhis2_name: str):
     """Saves the given table to DHIS2 and optionally to the OH database.
 
     Args:
@@ -175,8 +173,6 @@ def save_table(table: pd.DataFrame, dhis2_name: str, openhexa_dataset: Dataset |
         the table will not be saved to the OpenHexa database.
     """
     table.to_csv(f"{workspace.files_path}/{dhis2_name}/dataset_extraction.csv", index=False)
-    if openhexa_dataset is not None:
-        add_to_dataset(table, dhis2_name, openhexa_dataset)
 
 
 @dhis2_extract_dataset.task
