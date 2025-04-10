@@ -338,7 +338,7 @@ def extract_raw_data(
                         periods=[pe],
                     )
                     df = pd.DataFrame(data_values)
-                    df["dataset"] = datasets[id]["name"]
+                    df["dataset"] = datasets[ds_id]["name"]
                     df["periodType"] = datasets[ds_id]["periodType"]
                     df.to_csv(
                         f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{pe}.csv",
@@ -348,15 +348,15 @@ def extract_raw_data(
                 res = pd.concat([res, df])
         else:
             data_values = dhis.data_value_sets.get(
-                datasets=[id],
+                datasets=[ds_id],
                 data_elements=selected_data_elements,
-                org_units=datasets[id]["organisation_units"],
+                org_units=datasets[ds_id]["organisation_units"],
                 start_date=start,
                 end_date=end,
             )
             df = pd.DataFrame(data_values)
-            df["dataset"] = datasets[id]["name"]
-            df["periodType"] = datasets[id]["periodType"]
+            df["dataset"] = datasets[ds_id]["name"]
+            df["periodType"] = datasets[ds_id]["periodType"]
             res = pd.concat([res, df])
     return res
 
