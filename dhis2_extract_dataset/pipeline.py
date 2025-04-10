@@ -9,14 +9,14 @@ from urllib.parse import urlparse
 import geopandas as gpd
 import pandas as pd
 import polars as pl
-from openhexa.sdk import (
-    Dataset,
-    DHIS2Connection,
+from openhexa.sdk import Dataset, workspace
+from openhexa.sdk.pipelines import (
     current_run,
     parameter,
     pipeline,
-    workspace,
 )
+from openhexa.sdk.pipelines.parameter import DHIS2Widget
+from openhexa.sdk.workspaces.connection import DHIS2Connection
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.periods import Period, period_from_string
 
@@ -32,6 +32,8 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
 @parameter(
     "data_element_ids",
     type=str,
+    widget=DHIS2Widget.DATA_ELEMENTS,
+    connection="dhis_con",
     multiple=True,
     required=False,
     default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
@@ -60,10 +62,18 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=True,
     default=True,
 )
-@parameter("datasets_ids", type=str, multiple=True, default=["TuL8IOPzpHh"], required=True)
-@parameter("add_dx_name", type=bool, required=False, default=False)
-@parameter("add_coc_name", type=bool, required=False, default=False)
-@parameter("add_org_unit_parent", type=bool, required=False, default=False)
+@parameter(
+    "datasets_ids",
+    type=str,
+    multiple=True,
+    widget=DHIS2Widget.DATASETS,
+    connection="dhis_con",
+    default=["TuL8IOPzpHh"],
+    required=True,
+)
+@parameter("add_dx_name", type=bool, required=False, default=True)
+@parameter("add_coc_name", type=bool, required=False, default=True)
+@parameter("add_org_unit_parent", type=bool, required=False, default=True)
 def dhis2_extract_dataset(
     dhis_con: DHIS2Connection,
     datasets_ids: list[str],
@@ -155,17 +165,18 @@ def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:  # noqa: D417
 
 
 @dhis2_extract_dataset.task
-def save_table(
-    table: pd.DataFrame,
-    dhis2_name: str,
-):
+def save_table(table: pd.DataFrame, dhis2_name: str, openhexa_dataset: Dataset | None = None):
     """Saves the given table to DHIS2 and optionally to the OH database.
 
     Args:
         table (pd.DataFrame): The table to be saved.
         dhis2_name (str): The name of the DHIS2 instance.
+        openhexa_dataset (Dataset | None): The OpenHexa dataset to save the table to. If None,
+        the table will not be saved to the OpenHexa database.
     """
     table.to_csv(f"{workspace.files_path}/{dhis2_name}/dataset_extraction.csv", index=False)
+    if openhexa_dataset is not None:
+        add_to_dataset(table, dhis2_name, openhexa_dataset)
 
 
 @dhis2_extract_dataset.task
@@ -395,10 +406,10 @@ def enrich_data(
         if add_coc_name:
             table = dhis.meta.add_coc_name_column(table, "categoryOptionCombo")
         if add_org_unit_parent:
-            # table = dhis.add_org_unit_parent_columns(table)
-            print(table.sample(2))
-            table = dhis.meta.add_org_unit_parent_columns(table)
-            # table = add_parents(table, ous)
+            # table = dhis.meta.add_org_unit_parent_columns(table)
+            ous = get_orgunits_with_parents(ous, dhis2_name)
+            table = add_parents(table, ous)
+            table = table.drop(columns=["level", "geometry", "path"])
 
     return table
 
