@@ -1,4 +1,3 @@
-```markdown
 # IASO Form Submissions Extraction Pipeline
 
 ## 📌 Description
