@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 import geopandas as gpd
@@ -16,7 +17,7 @@ from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
 
-@pipeline(name="dhis2 shapes extract")
+@pipeline("dhis2_shapes_extract")
 @parameter(
     "dhis2_connection",
     name="DHIS2 instance",
@@ -47,30 +48,31 @@ def dhis2_shapes_extract(
     current_run.log_info("Shapes pipeline started")
 
     if output_path is None:
-        current_run.log_info("Output path not specified, using default")
-        output_path = Path(workspace.files_path).joinpath("dhis2_shapes_extract")
+        output_path = Path(workspace.files_path).joinpath("pipelines", "dhis2_shapes_extract")
+        current_run.log_info(f"Output path not specified, using default {output_path}")
     else:
         output_path = Path(output_path)
 
-    if not output_path.exists():
-        current_run.log_info(f"Output path {output_path} does not exist, creating it")
-        Path.mkdir(output_path, exist_ok=True)
+    if org_level is None:
+        current_run.log_info("No org level specified, using base level 1")
+        org_level = 1
 
     try:
-        # connect to DHIS2
-        dhis2 = get_dhis2_client(dhis2_connection)
+        dhis2_client = get_dhis2_client(dhis2_connection)
 
-        # Get shapes table
-        shapes = extract_shapes(dhis2, org_level)
+        shapes = extract_shapes(dhis2_client, org_level)
 
-        # Save shapes to output path
-        save_shapes(shapes, output_path, filename="shapes.gpkg")
+        save_shapes(
+            shapes=shapes,
+            output_path=output_path,
+            filename=f"shapes_level{org_level}_{datetime.now().strftime('%Y_%m_%d_%H%M')}.gpkg",
+        )
 
     except Exception as e:
         current_run.log_error(f"Pipeline stopped: {e}")
 
 
-# task 1
+@dhis2_shapes_extract.task
 def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
     """Get the DHIS2 connection.
 
@@ -78,7 +80,6 @@ def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
         DHIS2: An instance of the DHIS2 client connected to the specified DHIS2 instance.
     """
     try:
-        # Initialize DHIS2 connection
         dhis2_client = DHIS2(dhis2_connection, cache_dir=Path(workspace.files_path) / ".cache")
         current_run.log_info(f"Successfully connected to DHIS2 instance {dhis2_connection.url}")
         return dhis2_client
@@ -86,23 +87,24 @@ def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
         raise Exception(f"Error while connecting to {dhis2_connection.url} error: {e}") from e
 
 
-# task 2
 @dhis2_shapes_extract.task
-def extract_shapes(dhis2_client: DHIS2, org_level: int) -> gpd.GeoDataFrame:
+def extract_shapes(
+    dhis2_client: DHIS2, org_level: int, geometry_column: str = "geometry"
+) -> gpd.GeoDataFrame:
     """Retrieves organizational unit shapes from a DHIS2 instance.
 
     Returns:
         gpd.GeoDataFrame: A GeoDataFrame containing organizational unit shapes.
     """
-    if org_level is None:
-        current_run.log_info("No org level specified, using base level 1")
-        org_level = 1
-
     try:
-        df_polars = get_organisation_units(dhis2_client, max_level=org_level)
+        df_pyramid = get_organisation_units(dhis2_client, max_level=org_level)
+        df_pyramid = df_pyramid.filter(pl.col("level") == org_level).drop(
+            ["id", "name", "level", "opening_date", "closed_date"]
+        )
+        current_run.log_info(f"{df_pyramid.shape[0]} Shapes extracted for org level {org_level}")
 
-        # lets remove the empty names at this level
-        df_polars_filtered = df_polars.filter(pl.col(f"level_{org_level}_id").is_not_null())
+        if len(df_pyramid) == 0:
+            raise ValueError("No shapes found for the specified org level")
 
         # Convert GeoJSON strings to Shapely geometries
         def geojson_to_shapely(geojson_str: any) -> BaseGeometry:
@@ -111,37 +113,40 @@ def extract_shapes(dhis2_client: DHIS2, org_level: int) -> gpd.GeoDataFrame:
 
         # Apply the conversion to the geometry column
         shapely_geoms = (
-            df_polars_filtered["geometry"]
+            df_pyramid[geometry_column]
             .map_elements(geojson_to_shapely, return_dtype=pl.Object)
             .to_list()
         )
 
         # Convert to GeoPandas DataFrame
-        # NOTE: The geometry column is expected to be named 'geometry' in the GeoDataFrame
         return gpd.GeoDataFrame(
-            df_polars_filtered.drop("geometry").to_pandas(),
+            df_pyramid.drop(geometry_column).to_pandas(),
             geometry=shapely_geoms,
-            crs="EPSG:4326",  # Assuming WGS84 coordinate system
+            crs="EPSG:4326",  # NOTE: Assuming WGS84 coordinate system
         )
 
     except Exception as e:
-        current_run.log_error(f"Error while extracting shapes: {e}")
-        return None
+        raise Exception(f"Error while extracting shapes: {e}") from e
 
 
-# task 3
 @dhis2_shapes_extract.task
 def save_shapes(shapes: gpd.GeoDataFrame, output_path: Path, filename: str) -> None:
     """Saves the shapes to the specified output path."""
     try:
-        shapes.to_file(Path(output_path).joinpath(filename), driver="GPKG")
-        current_run.log_info(f"GeoDataFrame successfully saved to {output_path}")
-    except PermissionError:
-        current_run.log_error("Error: You don't have permission to access this file.")
-    except OSError as e:
-        current_run.log_error(f"An I/O error occurred: {e}")
+        output_path.mkdir(parents=True, exist_ok=True)
     except Exception as e:
-        current_run.log_error(f"An unexpected error occurred: {e}")
+        raise Exception(f"Error creating output directory {output_path}: {e}") from e
+
+    try:
+        output_fname = Path(output_path).joinpath(filename)
+        shapes.to_file(output_fname, driver="GPKG")
+        current_run.log_info(f"GeoDataFrame successfully saved to {output_fname}")
+    except PermissionError as e:
+        raise PermissionError("Error: You don't have permission to access this file.") from e
+    except OSError as e:
+        raise OSError(f"An I/O error occurred: {e}") from e
+    except Exception as e:
+        raise Exception(f"An unexpected error occurred: {e}") from e
 
 
 if __name__ == "__main__":

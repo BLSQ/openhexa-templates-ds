@@ -20,10 +20,9 @@ DHIS2_shapes_extract/
 The pipeline downloads raw organization units metadata from the target DHIS2 and stores a formated table in the indicated output path in OpenHEXA
 workspace. The output file is stored as a geodataframe format (.gpkg).
 
-
 ## Example run
 
-![Example run](docs/images/example_run.png)
+![Example run](docs/images/interface.png)
 
 ## Flow
 
