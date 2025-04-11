@@ -196,7 +196,7 @@ def export_to_dataset(
         version = version or dataset.create_version(version_name)
 
         # add file to dataset version
-        version.add_file(file_path)
+        version.add_file(file_path, filename=file_path.name)
 
         current_run.log_info(f"Metadata saved to dataset {dataset.name} in {version.name} version")
     except Exception as e:
