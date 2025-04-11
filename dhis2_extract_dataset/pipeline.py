@@ -375,6 +375,11 @@ def extract_raw_data(
                 data_values = dhis.data_value_sets.get(
                     datasets=[ds_id], org_units=datasets[ds_id]["organisation_units"], periods=[pe]
                 )
+                if len(data_values) == 0:
+                    current_run.log_warning(
+                        f"No data found for dataset {datasets[ds_id]['name']} for period {pe}"
+                    )
+                    continue
                 df = pd.DataFrame(data_values)
                 df["dataset"] = datasets[ds_id]["name"]
                 df["periodType"] = datasets[ds_id]["periodType"]
