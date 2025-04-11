@@ -268,7 +268,7 @@ def export_to_dataset(dataset: Dataset, submissions: pl.DataFrame, form_name: st
         version_name = f"form_{form_name}"
         version = next((v for v in dataset.versions if v.name == version_name), None)
         version = version or dataset.create_version(version_name)
-        version.add_file(output_path)
+        version.add_file(output_path, output_path.name)
         current_run.log_info(
             f"Form submissions successfully saved to {dataset.name} dataset "
             f"in `{version.name}` version"
