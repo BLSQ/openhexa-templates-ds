@@ -217,7 +217,7 @@ def export_to_dataset(
 
         geo_df.to_file(output_path, driver="GPKG")
         version = _get_or_create_dataset_version(dataset, final_name)
-        version.add_file(output_path)
+        version.add_file(output_path, output_path.name)
 
         current_run.log_info(
             f"Exported {len(geo_df)} units to dataset `{dataset.name}` in `{version.name}` version"
