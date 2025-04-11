@@ -318,6 +318,8 @@ def extract_raw_data(
         pd.DataFrame: Pandas DataFrame containing the extracted raw data, with additional columns
         for dataset name and period type.
     """
+    start_init = start
+    end_init = end
     res = pd.DataFrame()
     for ds_id in datasets_ids:
         selected_data_elements = select_data_elements(
@@ -326,10 +328,14 @@ def extract_raw_data(
         print(selected_data_elements)
         print(dhis.version)
         period_type = datasets[ds_id]["periodType"]
-        start = isodate_to_period_type(start, period_type)
-        end = isodate_to_period_type(end, period_type)
+        start = isodate_to_period_type(start_init, period_type)
+        end = isodate_to_period_type(end_init, period_type)
         current_run.log_info(f"Extracting data for dataset {datasets[ds_id]['name']}")
-        if dhis.version >= "2.39" and selected_data_elements is not None:
+        if (
+            dhis.version >= "2.39"
+            and selected_data_elements is not None
+            and len(selected_data_elements) > 0
+        ):
             for dx in selected_data_elements:
                 dx_name = dhis.meta.data_elements(fields="id,name", filters={f"id:eq:{dx}"})[0][
                     "name"
