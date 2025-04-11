@@ -36,7 +36,7 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     connection="dhis_con",
     multiple=True,
     required=False,
-    # default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
+    default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
 )
 @parameter(
     "start",
@@ -55,8 +55,9 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     default=None,
 )
 @parameter(
-    "save_by_month",
-    name="Store datasets values by period in the folder spaces",
+    "use_cache",
+    name="Use already extracted data if available",
+    help="If true, the pipeline will use already extracted data if available.",
     type=bool,
     required=True,
     default=True,
@@ -67,7 +68,7 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     widget=DHIS2Widget.DATASETS,
     connection="dhis_con",
     multiple=True,
-    # default=["TuL8IOPzpHh"],
+    default=["TuL8IOPzpHh"],
     required=True,
 )
 @parameter("add_dx_name", type=bool, required=False, default=True)
@@ -79,7 +80,7 @@ def dhis2_extract_dataset(
     data_element_ids: list[str],
     start: str,
     end: str | None,
-    save_by_month: bool,
+    use_cache: bool,
     add_dx_name: bool,
     add_org_unit_parent: bool,
     add_coc_name: bool,
@@ -96,9 +97,9 @@ def dhis2_extract_dataset(
     ds = get_datasets(dhis, dhis2_name)
     ous = get_ous(dhis)
     data_element_ids = warning_request(datasets_ids, ds, data_element_ids, ous)
-    dhis2_name = create_extraction_folder(dhis2_name, save_by_month, ds, datasets_ids)
+    dhis2_name = create_extraction_folder(dhis2_name, ds, datasets_ids)
     table = extract_raw_data(
-        dhis, dhis2_name, save_by_month, datasets_ids, ds, start, end, data_element_ids
+        dhis, dhis2_name, use_cache, datasets_ids, ds, start, end, data_element_ids
     )
     table = enrich_data(
         dhis, dhis2_name, ous, table, add_dx_name, add_org_unit_parent, add_coc_name
@@ -121,17 +122,16 @@ def get_dhis2_name_domain(dhis_con: DHIS2Connection) -> str:
     Returns:
         str: The formatted subdomain extracted from the DHIS2 connection URL.
     """
-    subdomain = urlparse(dhis_con.url).netloc.split(".")[0]
+    subdomain = "_".join(urlparse(dhis_con.url).netloc.split("."))
     return f"{subdomain.replace('-', '_')}"
 
 
 @dhis2_extract_dataset.task
-def create_extraction_folder(dhis2_name: str, save_by_month: bool, ds: dict, ids: list[str]) -> str:
+def create_extraction_folder(dhis2_name: str, ds: dict, ids: list[str]) -> str:
     """Creates a folder structure for data extraction.
 
     Args:
         dhis2_name (str): The name of the DHIS2 instance.
-        save_by_month (bool): Whether to save data by month.
         ds (dict): A dictionary containing dataset information.
         ids (list[str]): A list of dataset IDs.
 
@@ -139,10 +139,9 @@ def create_extraction_folder(dhis2_name: str, save_by_month: bool, ds: dict, ids
         str: The name of the DHIS2 instance.
     """
     Path(f"{workspace.files_path}/{dhis2_name}").mkdir(parents=True, exist_ok=True)
-    if save_by_month:
-        for i in ids:
-            name = ds[i]["name"]
-            Path(f"{workspace.files_path}/{dhis2_name}/{name}").mkdir(parents=True, exist_ok=True)
+    for i in ids:
+        name = ds[i]["name"]
+        Path(f"{workspace.files_path}/{dhis2_name}/{name}").mkdir(parents=True, exist_ok=True)
     return dhis2_name
 
 
@@ -232,7 +231,7 @@ def warning_request(
             current_run.log_error(
                 f"Data elements {unmatched_data_elements} are not associated to any dataset"
             )
-        return all_data_elements - set(data_element_ids)
+        return all_data_elements.intersection(set(data_element_ids))
     return None
 
 
@@ -294,7 +293,7 @@ def valid_date(date_str: str | None) -> str:
 def extract_raw_data(
     dhis: DHIS2,
     dhis2_name: str,
-    save_by_month: bool,
+    use_cache: bool,
     datasets_ids: list[str],
     datasets: dict,
     start: str,
@@ -306,7 +305,7 @@ def extract_raw_data(
     Args:
         dhis (DHIS2): DHIS2 client object used to interact with the DHIS2 API.
         dhis2_name (str): The name of the DHIS2 instance.
-        save_by_month (bool): Whether to save data by month.
+        use_cache (bool): Use already extracted data.
         datasets_ids (list[str]): List of dataset IDs to extract data from.
         datasets (dict): Dictionary containing dataset information, including data elements and
         organisation units.
@@ -324,47 +323,71 @@ def extract_raw_data(
         selected_data_elements = select_data_elements(
             data_element_ids, datasets[ds_id]["data_elements"]
         )
+        print(selected_data_elements)
+        print(dhis.version)
         period_type = datasets[ds_id]["periodType"]
+        start = isodate_to_period_type(start, period_type)
+        end = isodate_to_period_type(end, period_type)
         current_run.log_info(f"Extracting data for dataset {datasets[ds_id]['name']}")
-        if save_by_month:
-            start = isodate_to_period_type(start, period_type)
-            end = isodate_to_period_type(end, period_type)
+        if dhis.version >= "2.39" and selected_data_elements is not None:
+            for dx in selected_data_elements:
+                dx_name = dhis.meta.data_elements(fields="id,name", filters={f"id:eq:{dx}"})[0][
+                    "name"
+                ]
+                Path(
+                    f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}"
+                ).mkdir(parents=True, exist_ok=True)
+                for pe in start.get_range(end):
+                    current_run.log_info(f"Extracting data for period {pe}")
+                    if (
+                        Path(
+                            f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
+                        ).exists()
+                        and use_cache
+                    ):
+                        df = pd.read_csv(
+                            f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
+                        )
+                    else:
+                        data_values = dhis.data_value_sets.get(
+                            datasets=[ds_id],
+                            data_elements=[dx],
+                            org_units=datasets[ds_id]["organisation_units"],
+                            periods=[pe],
+                        )
+                        df = pd.DataFrame(data_values)
+                        df["dataset"] = datasets[ds_id]["name"]
+                        df["periodType"] = datasets[ds_id]["periodType"]
+                        df.to_csv(
+                            f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
+                        )
+                        current_run.log_info(f"Data for period {pe} saved: {df.shape[0]} rows")
+                    res = pd.concat([res, df])
+        else:
             for pe in start.get_range(end):
                 current_run.log_info(f"Extracting data for period {pe}")
-                if Path(
-                    f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{pe}.csv"
-                ).exists():
-                    df = pd.read_csv(
-                        f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{pe}.csv"
-                    )
-                else:
-                    data_values = dhis.data_value_sets.get(
-                        datasets=[ds_id],
-                        data_elements=selected_data_elements,
-                        org_units=datasets[ds_id]["organisation_units"],
-                        periods=[pe],
-                    )
-                    df = pd.DataFrame(data_values)
-                    df["dataset"] = datasets[ds_id]["name"]
-                    df["periodType"] = datasets[ds_id]["periodType"]
-                    df.to_csv(
-                        f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{pe}.csv",
-                        index=False,
+                data_values = dhis.data_value_sets.get(
+                    datasets=[ds_id], org_units=datasets[ds_id]["organisation_units"], periods=[pe]
+                )
+                df = pd.DataFrame(data_values)
+                df["dataset"] = datasets[ds_id]["name"]
+                df["periodType"] = datasets[ds_id]["periodType"]
+                for dx in datasets[ds_id]["data_elements"]:
+                    df_dx = df[df["dataElement"] == dx]
+                    if df_dx.empty:
+                        continue
+                    dx_name = dhis.meta.data_elements(fields="id,name", filters={f"id:eq:{dx}"})[0][
+                        "name"
+                    ]
+                    Path(
+                        f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}"
+                    ).mkdir(parents=True, exist_ok=True)
+
+                    df_dx.to_csv(
+                        f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
                     )
                     current_run.log_info(f"Data for period {pe} saved: {df.shape[0]} rows")
                 res = pd.concat([res, df])
-        else:
-            data_values = dhis.data_value_sets.get(
-                datasets=[ds_id],
-                data_elements=selected_data_elements,
-                org_units=datasets[ds_id]["organisation_units"],
-                start_date=start,
-                end_date=end,
-            )
-            df = pd.DataFrame(data_values)
-            df["dataset"] = datasets[ds_id]["name"]
-            df["periodType"] = datasets[ds_id]["periodType"]
-            res = pd.concat([res, df])
     return res
 
 
