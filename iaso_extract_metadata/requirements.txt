@@ -1,1 +1,2 @@
+XlsxWriter
 openhexa.toolbox @ git+https://github.com/BLSQ/openhexa-toolbox@main
