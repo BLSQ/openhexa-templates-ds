@@ -375,6 +375,11 @@ def extract_raw_data(
                 data_values = dhis.data_value_sets.get(
                     datasets=[ds_id], org_units=datasets[ds_id]["organisation_units"], periods=[pe]
                 )
+                if len(data_values) == 0:
+                    current_run.log_warning(
+                        f"No data found for dataset {datasets[ds_id]['name']} for period {pe}"
+                    )
+                    continue
                 df = pd.DataFrame(data_values)
                 df["dataset"] = datasets[ds_id]["name"]
                 df["periodType"] = datasets[ds_id]["periodType"]
@@ -421,11 +426,11 @@ def enrich_data(
     Returns:
         pd.DataFrame: The enriched table.
     """
-    table = table.rename(columns={"dataElement": "dx", "orgUnit": "ou", "period": "pe"})
-    print(table.columns)
     length_table = len(table)
     current_run.log_info("Length of the table is : " + str(length_table))
     if length_table > 0:
+        table = table.rename(columns={"dataElement": "dx", "orgUnit": "ou", "period": "pe"})
+        print(table.columns)
         if add_dx_name:
             table = dhis.meta.add_dx_name_column(table)
         if add_coc_name:
