@@ -430,6 +430,7 @@ def enrich_data(
     current_run.log_info("Length of the table is : " + str(length_table))
     if length_table > 0:
         table = table.rename(columns={"dataElement": "dx", "orgUnit": "ou", "period": "pe"})
+        table["pe"] = table["pe"].astype(str)
         print(table.columns)
         if add_dx_name:
             table = dhis.meta.add_dx_name_column(table)
