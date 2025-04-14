@@ -82,6 +82,12 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
                     df = pd.read_csv(csv_file)
                     if "period" in df.columns:
                         df = parse_period_column(df)
+                    else:
+                        current_run.log_warning(
+                            f"{csv_file} does not contain 'period' column standard name for date\
+                                column."
+                        )
+
                     keep = [col for col in df.columns if skip_columns not in col]
                     all_dfs.append(df[keep])
                     if len(all_dfs) == 1:
