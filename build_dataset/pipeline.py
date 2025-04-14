@@ -59,9 +59,12 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
         - Logs warnings for non-directory entries or failed CSV reads.
         - Logs errors if no valid CSV files are found in a subdirectory.
     """
+    dataset_name = dataset.name
     for dataset_path_str in dataset_paths:
-        dataset_path = Path(dataset_path_str)
-        dataset_name = dataset.name
+        dataset_path = Path(f"{workspace.files_path}/{dataset_path_str}")
+        if not dataset_path.exists():
+            current_run.log_error(f"Dataset path does not exist: {dataset_path}")
+            continue
 
         current_run.log_info(f"Processing dataset folder: {dataset_name}")
 
@@ -111,8 +114,8 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
 
         concatenated_df = pd.concat(all_dfs, ignore_index=True)
     if len(dataset_paths) > 1:
-        output_filename = f"{dataset_path.name}.csv"
-        output_path = f"{dataset_path_str}/{output_filename}"
+        output_filename = f"{dataset_path_str}.csv"
+        output_path = f"{workspace.files_path}/{dataset_path_str}/{output_filename}"
     else:
         output_filename = f"{dataset_name}.csv"
         output_path = f"{workspace.files_path}/{output_filename}"
