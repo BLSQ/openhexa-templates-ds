@@ -26,15 +26,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=True,
 )
 @parameter(
-    "data_element_ids",
-    type=str,
-    widget=DHIS2Widget.DATA_ELEMENTS,
-    connection="dhis_con",
-    multiple=True,
-    required=False,
-    default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
-)
-@parameter(
     "start",
     name="Start Date (ISO format)",
     help="ISO format: yyyy-mm-dd",
@@ -51,14 +42,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     default=None,
 )
 @parameter(
-    "use_cache",
-    name="Use already extracted data if available",
-    help="If true, the pipeline will use already extracted data if available.",
-    type=bool,
-    required=True,
-    default=True,
-)
-@parameter(
     "datasets_ids",
     type=str,
     widget=DHIS2Widget.DATASETS,
@@ -68,8 +51,17 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=True,
 )
 @parameter(
+    "data_element_ids",
+    type=str,
+    widget=DHIS2Widget.DATA_ELEMENTS,
+    connection="dhis_con",
+    multiple=True,
+    required=False,
+    default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
+)
+@parameter(
     "ou_level",
-    name="Level of orgunits",
+    name="Orgunit level",
     widget=DHIS2Widget.ORG_UNIT_LEVELS,
     connection="dhis_con",
     type=int,
@@ -87,6 +79,14 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     default=None,
 )
 @parameter(
+    "include_children",
+    name="Include children (of orgunits)",
+    type=bool,
+    help="Only works if Orgunits are selected.",
+    required=False,
+    default=False,
+)
+@parameter(
     "ou_group_ids",
     name="Group(s) of orgunits",
     widget=DHIS2Widget.ORG_UNIT_GROUPS,
@@ -96,7 +96,14 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=False,
     default=None,
 )
-@parameter("include_children", type=bool, required=False, default=False)
+@parameter(
+    "use_cache",
+    name="Use already extracted data if available",
+    help="If true, the pipeline will use already extracted data if available.",
+    type=bool,
+    required=True,
+    default=True,
+)
 @parameter("add_dx_name", type=bool, required=False, default=True)
 @parameter("add_coc_name", type=bool, required=False, default=True)
 @parameter("add_org_unit_parent", type=bool, required=False, default=True)
@@ -338,6 +345,10 @@ def warning_request(
         set or None: If `data_element_ids` is a non-empty list, returns a set of all data elements
         associated with the datasets that are not in `data_element_ids`. Otherwise, returns None.
     """
+    for ds_id in ids:
+        if ds_id not in datasets:
+            current_run.log_error(f"Dataset id: {ds_id} not found in thius DHIS2 instance.")
+            raise ValueError(f"Dataset id: {ds_id} not found in thius DHIS2 instance.")
     levels = {level for i in ids for level in get_levels(ous, datasets[i]["organisation_units"])}
     frequencies = {datasets[i]["periodType"] for i in ids}
     if len(levels) > 1:
