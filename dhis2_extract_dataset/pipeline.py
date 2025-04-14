@@ -28,8 +28,8 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
 @parameter(
     "data_element_ids",
     type=str,
-    # widget=DHIS2Widget.DATA_ELEMENTS,
-    # connection="dhis_con",
+    widget=DHIS2Widget.DATA_ELEMENTS,
+    connection="dhis_con",
     multiple=True,
     required=False,
     default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
@@ -61,8 +61,8 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
 @parameter(
     "datasets_ids",
     type=str,
-    # widget=DHIS2Widget.DATASETS,
-    # connection="dhis_con",
+    widget=DHIS2Widget.DATASETS,
+    connection="dhis_con",
     multiple=True,
     default=["TuL8IOPzpHh"],
     required=True,
@@ -278,6 +278,20 @@ def select_ous(
     include_children: bool,
     conditions: list[bool],
 ) -> list[dict]:
+    """Select organizational units based on the provided filters.
+
+    Args:
+        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
+        all_ous (list[dict]): A list of all organizational units.
+        ou_ids (list[str] | None): List of organization unit IDs or None.
+        ou_group_ids (list[str] | None): List of organization unit group IDs or None.
+        ou_level (int | None): Level of organization units or None.
+        include_children (bool): Whether to include child organizational units.
+        conditions (list[bool]): Validation conditions for the parameters.
+
+    Returns:
+        list[dict]: A list of selected organizational units.
+    """
     selected_ou_ids = set()
     if conditions["ou_ids + include_children"]:
         all_ous_dict = {ou["id"]: ou for ou in all_ous}
