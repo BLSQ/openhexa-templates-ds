@@ -104,26 +104,20 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
                                 f"Inconsistent columns between {csv_file} and {first_csv_file}:\
                                       {inconsistent_columns}"
                             )
-
+                    concatenated_df = pd.concat(all_dfs, ignore_index=True)
                 except Exception as e:
                     current_run.log_warning(f"Failed to read {csv_file}: {e}")
 
+            output_filename = f"{data_element_folder}.csv"
+            output_path = f"{workspace.files_path}/{dataset_path_str}/{output_filename}"
+            concatenated_df.to_csv(output_path, index=False)
+            version.add_file(source=output_path, filename=output_filename)
+            current_run.log_info(f"Added file: {output_filename} to dataset version")
             if not all_dfs:
                 current_run.log_error(f"No valid CSV files found in {data_element_folder}")
                 continue
 
-        concatenated_df = pd.concat(all_dfs, ignore_index=True)
-    if len(dataset_paths) > 1:
-        output_filename = f"{dataset_path_str}.csv"
-        output_path = f"{workspace.files_path}/{dataset_path_str}/{output_filename}"
-    else:
-        output_filename = f"{dataset_name}.csv"
-        output_path = f"{workspace.files_path}/{output_filename}"
-    concatenated_df.to_csv(output_path, index=False)
-
     # Upload to dataset version using DatasetVersion.add_file
-    version.add_file(source=output_path, filename=output_filename)
-    current_run.log_info(f"Added file: {output_filename} to dataset version")
 
 
 def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:
