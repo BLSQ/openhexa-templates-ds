@@ -137,7 +137,7 @@ def dhis2_extract_dataset(
     selected_ous = select_ous(
         dhis, ous, ou_ids, ou_group_ids, ou_level, include_children, conditions
     )
-    data_element_ids = warning_request(datasets_ids, ds, data_element_ids, ous)
+    data_element_ids = warning_request(datasets_ids, ds, data_element_ids, ous, dhis)
     dhis2_name = create_extraction_folder(dhis2_name, ds, datasets_ids)
     table = extract_raw_data(
         dhis, dhis2_name, use_cache, selected_ous, datasets_ids, ds, start, end, data_element_ids
