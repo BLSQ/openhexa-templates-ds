@@ -345,6 +345,10 @@ def warning_request(
         set or None: If `data_element_ids` is a non-empty list, returns a set of all data elements
         associated with the datasets that are not in `data_element_ids`. Otherwise, returns None.
     """
+    for ds_id in ids:
+        if ds_id not in datasets:
+            current_run.log_error(f"Dataset id: {ds_id} not found in thius DHIS2 instance.")
+            raise ValueError(f"Dataset id: {ds_id} not found in thius DHIS2 instance.")
     levels = {level for i in ids for level in get_levels(ous, datasets[i]["organisation_units"])}
     frequencies = {datasets[i]["periodType"] for i in ids}
     if len(levels) > 1:
