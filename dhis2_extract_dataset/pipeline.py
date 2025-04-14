@@ -26,15 +26,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=True,
 )
 @parameter(
-    "data_element_ids",
-    type=str,
-    widget=DHIS2Widget.DATA_ELEMENTS,
-    connection="dhis_con",
-    multiple=True,
-    required=False,
-    default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
-)
-@parameter(
     "start",
     name="Start Date (ISO format)",
     help="ISO format: yyyy-mm-dd",
@@ -51,14 +42,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     default=None,
 )
 @parameter(
-    "use_cache",
-    name="Use already extracted data if available",
-    help="If true, the pipeline will use already extracted data if available.",
-    type=bool,
-    required=True,
-    default=True,
-)
-@parameter(
     "datasets_ids",
     type=str,
     widget=DHIS2Widget.DATASETS,
@@ -66,6 +49,15 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     multiple=True,
     default=["TuL8IOPzpHh"],
     required=True,
+)
+@parameter(
+    "data_element_ids",
+    type=str,
+    widget=DHIS2Widget.DATA_ELEMENTS,
+    connection="dhis_con",
+    multiple=True,
+    required=False,
+    default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
 )
 @parameter(
     "ou_level",
@@ -97,6 +89,14 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     default=None,
 )
 @parameter("include_children", type=bool, required=False, default=False)
+@parameter(
+    "use_cache",
+    name="Use already extracted data if available",
+    help="If true, the pipeline will use already extracted data if available.",
+    type=bool,
+    required=True,
+    default=True,
+)
 @parameter("add_dx_name", type=bool, required=False, default=True)
 @parameter("add_coc_name", type=bool, required=False, default=True)
 @parameter("add_org_unit_parent", type=bool, required=False, default=True)
