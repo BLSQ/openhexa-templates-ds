@@ -331,7 +331,7 @@ def select_ous(
 
 @dhis2_extract_dataset.task
 def warning_request(
-    ids: list[str], datasets: dict, data_element_ids: list[str], ous: list[str]
+    ids: list[str], datasets: dict, data_element_ids: list[str], ous: list[str], dhis: DHIS2
 ) -> set | None:
     """Check for warnings in the datasets.
 
@@ -340,6 +340,7 @@ def warning_request(
         datasets (dict): Dictionary containing dataset information.
         data_element_ids (list): List of data element IDs.
         ous (list): List of organisation unit IDs.
+        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
 
     Returns:
         set or None: If `data_element_ids` is a non-empty list, returns a set of all data elements
@@ -359,8 +360,11 @@ def warning_request(
         current_run.log_warning(
             f"The frequency associated to your datasets are mixed : {frequencies}"
         )
-    print(data_element_ids, type(data_element_ids))
     if isinstance(data_element_ids, list) and len(data_element_ids) > 0:
+        if dhis.version < "2.39":
+            current_run.log_warning(
+                "Impossible to filter on data elements the DHIS2 API for versions < 2.39."
+            )
         all_data_elements = {dx for i in ids for dx in datasets[i]["data_elements"]}
         unmatched_data_elements = set(data_element_ids) - all_data_elements
         if len(unmatched_data_elements) > 0:
