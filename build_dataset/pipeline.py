@@ -97,8 +97,8 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
                         first_csv_file = csv_file
                     elif len(all_dfs) > 1:
                         inconsistent_columns = set(all_dfs[0].columns) - set(
-                            df.all_dfs[-1].columns
-                        ) | set(all_dfs[-1].columns) - set(df.all_dfs[0].columns)
+                            all_dfs[-1].columns
+                        ) | set(all_dfs[-1].columns) - set(all_dfs[0].columns)
                         if inconsistent_columns:
                             current_run.log_warning(
                                 f"Inconsistent columns between {csv_file} and {first_csv_file} \
