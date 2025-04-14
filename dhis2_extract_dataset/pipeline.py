@@ -61,7 +61,7 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
 )
 @parameter(
     "ou_level",
-    name="Level of orgunits",
+    name="Orgunit level",
     widget=DHIS2Widget.ORG_UNIT_LEVELS,
     connection="dhis_con",
     type=int,
@@ -79,6 +79,14 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     default=None,
 )
 @parameter(
+    "include_children",
+    name="Include children (of orgunits)",
+    type=bool,
+    help="Only works if Orgunits are selected.",
+    required=False,
+    default=False,
+)
+@parameter(
     "ou_group_ids",
     name="Group(s) of orgunits",
     widget=DHIS2Widget.ORG_UNIT_GROUPS,
@@ -88,7 +96,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=False,
     default=None,
 )
-@parameter("include_children", type=bool, required=False, default=False)
 @parameter(
     "use_cache",
     name="Use already extracted data if available",
