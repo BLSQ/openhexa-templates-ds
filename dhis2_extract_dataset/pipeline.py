@@ -363,8 +363,10 @@ def warning_request(
     if isinstance(data_element_ids, list) and len(data_element_ids) > 0:
         if dhis.version < "2.39":
             current_run.log_warning(
-                "Impossible to filter on data elements the DHIS2 API for versions < 2.39."
+                f"Impossible to filter on data elements the DHIS2 API for versions {dhis.version}."
             )
+            return []
+
         all_data_elements = {dx for i in ids for dx in datasets[i]["data_elements"]}
         unmatched_data_elements = set(data_element_ids) - all_data_elements
         if len(unmatched_data_elements) > 0:
@@ -527,7 +529,7 @@ def extract_raw_data(
                         df.to_csv(
                             f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
                         )
-                        current_run.log_info(f"Data for period {pe} saved: {df.shape[0]} rows")
+                        current_run.log_info(f"{dx_name} for period {pe} saved: {df.shape[0]} rows")
                     res = pd.concat([res, df], ignore_index=True)
         else:
             for pe in start.get_range(end):
@@ -559,7 +561,7 @@ def extract_raw_data(
                     df_dx.to_csv(
                         f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
                     )
-                    current_run.log_info(f"Data for period {pe} saved: {df.shape[0]} rows")
+                current_run.log_info(f"Data for period {pe} saved: {df.shape[0]} rows")
                 res = pd.concat([res, df], ignore_index=True)
     return res
 
