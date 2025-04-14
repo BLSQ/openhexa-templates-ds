@@ -234,7 +234,17 @@ def warning_post_extraction(
 @dhis2_extract_dataset.task
 def parameters_validation(
     ou_ids: list[str] | None, ou_group_ids: list[str] | None, ou_level: int | None
-):
+) -> dict[str, bool]:
+    """Validates the parameters for organizational unit selection.
+
+    Args:
+        ou_ids (list[str] | None): List of organization unit IDs or None.
+        ou_group_ids (list[str] | None): List of organization unit group IDs or None.
+        ou_level (int | None): Level of organization units or None.
+
+    Returns:
+        dict[str, bool]: A dictionary indicating the validation conditions for the parameters.
+    """
     conditions = {
         "ou_ids + include_children": isinstance(ou_ids, list)
         and len(ou_ids) > 0
@@ -412,6 +422,7 @@ def extract_raw_data(
         dhis (DHIS2): DHIS2 client object used to interact with the DHIS2 API.
         dhis2_name (str): The name of the DHIS2 instance.
         use_cache (bool): Use already extracted data.
+        selected_ou_ids (set): Set of selected organization unit IDs to extract data for.
         datasets_ids (list[str]): List of dataset IDs to extract data from.
         datasets (dict): Dictionary containing dataset information, including data elements and
         organisation units.
