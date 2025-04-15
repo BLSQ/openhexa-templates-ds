@@ -1,15 +1,11 @@
 """Template for newly generated pipelines."""
 
 import json
-import re
-import tempfile
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-import geopandas as gpd
 import pandas as pd
-import polars as pl
 from openhexa.sdk import Dataset, workspace
 from openhexa.sdk.pipelines import current_run, parameter, pipeline
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
@@ -42,6 +38,7 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=True,
     default="2024-01-01",
 )
+@parameter("dataset", name="OUTPUT: Openhexa dataset", type=Dataset, required=True)
 @parameter(
     "end",
     name="End Date (ISO format)",
@@ -50,7 +47,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=False,
     default=None,
 )
-@parameter("dataset", name="OUTPUT: Openhexa dataset", type=Dataset, required=True)
 @parameter(
     "data_element_ids",
     type=str,
@@ -637,51 +633,16 @@ def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:
         df (pd.DataFrame): The input DataFrame containing a 'period' column.
 
     Returns:
-        pd.DataFrame: The DataFrame with the 'period' column parsed into a standardized datetime
-        format.
+        pd.DataFrame: The DataFrame with the 'period' column parsed into a standardized
+        datetime format.
 
     Raises:
         ValueError: If the 'period' column contains an unrecognized format.
     """
-    # Only process if "period" exists
-    if "period" not in df.columns:
+    if "pe" not in df.columns:
         return df
-
-    sample_value = str(df["period"].dropna().iloc[0])
-
-    # Define format checkers
-    known_formats = [
-        ("%Y-%m-%d", lambda v: re.fullmatch(r"\d{4}-\d{2}-\d{2}", v)),
-        ("%Y%m", lambda v: re.fullmatch(r"\d{6}", v)),
-        ("%Y", lambda v: re.fullmatch(r"\d{4}", v)),
-        ("%YQ%q", lambda v: re.fullmatch(r"\d{4}Q[1-4]", v)),  # custom handled
-    ]
-
-    for fmt, checker in known_formats:
-        if checker(sample_value):
-            if fmt == "%YQ%q":
-                # Custom parse YYYYQq (e.g., "2024Q2")
-                df["period"] = df["period"].apply(_parse_quarter)
-            else:
-                df["period"] = pd.to_datetime(df["period"], format=fmt)
-            return df
-
-    # Fallback to automatic parsing
-    try:
-        df["period"] = pd.to_datetime(df["period"])
-    except Exception:
-        raise ValueError(f"Unrecognized period format: {sample_value}") from None
-
+    df["pe"] = df["pe"].map(lambda x: period_from_string(x).datetime)
     return df
-
-
-def _parse_quarter(qstr: str) -> pd.Timestamp:
-    match = re.match(r"(\d{4})Q([1-4])", qstr)
-    if not match:
-        raise ValueError(f"Invalid quarter format: {qstr}")
-    year, quarter = int(match.group(1)), int(match.group(2))
-    month = (quarter - 1) * 3 + 1
-    return pd.Timestamp(year=year, month=month, day=1)
 
 
 def is_iso_date(date_str: str) -> bool:
@@ -802,86 +763,6 @@ def get_dataelements_with_no_data(retrieve_dataelements: list[str], dataset: dic
             f"The following data elements have no data: {missing_dataelements} for {dataset_name}"
         )
     return missing_dataelements
-
-
-# add the data to the dataset
-def add_to_dataset(table: pd.DataFrame, dhis2_connection: DHIS2, dataset: Dataset):
-    """Adds the given table data to a dataset in DHIS2.
-
-    Args:
-        table (pd.DataFrame): The table data to be added to the dataset.
-        dhis2_connection (DHIS2): The DHIS2 connection object.
-        dataset (Dataset): The dataset object to which the data will be added.
-
-    """
-    # we do not have access to the connection slug, so we use the url sub-domain instead..
-    # for the moment
-    subdomain = urlparse(dhis2_connection.url).netloc.split(".")[0]
-    dataset_name = f"{subdomain.replace('-', '_')}_dataset_extraction"
-    if dataset is None:
-        dataset = search_dataset(dataset_name)
-        if dataset is None:
-            dataset = workspace.create_dataset(dataset_name, "dataset extraction")  # Create dataset
-    add_data_to_dataset(data=table, dataset=dataset, fname=dataset_name, extension="csv")
-
-
-def search_dataset(dataset_name: str) -> Dataset | None:
-    """Searches for a dataset with the given name in the workspace.
-
-    Args:
-        dataset_name (str): The name of the dataset to search for.
-
-    Returns:
-        dataset: The dataset object if found, None otherwise.
-    """
-    try:
-        dataset = workspace.get_dataset(dataset_name)
-    except Exception:
-        current_run.log_error(f"Dataset {dataset_name} not found")
-        return None
-    return dataset
-
-
-def add_data_to_dataset(
-    data: pd.DataFrame | gpd.GeoDataFrame | pl.DataFrame,
-    dataset: Dataset,
-    fname: str,
-    extension: str = "csv",
-):
-    """Add files to a dataset by creating a new version."""
-    try:
-        if isinstance(data, pd.DataFrame):
-            df = data
-        elif isinstance(data, gpd.GeoDataFrame):
-            df = data
-        elif isinstance(data, pl.DataFrame):
-            df = data.to_pandas()  # Convert polars dataFrame to pandas
-        else:
-            raise ValueError("Input data must be a DataFrame, GeoDataFrame or Polars DataFrame.")
-
-        # Add file to dataset version
-        with tempfile.NamedTemporaryFile(suffix=f".{extension}") as tmp:
-            if extension == "parquet":
-                df.to_parquet(tmp.name)
-            elif extension == "csv":
-                df.to_csv(tmp.name, index=False)
-            elif extension == "gpkg":
-                if not isinstance(df, gpd.GeoDataFrame):
-                    raise ValueError("GeoDataFrame required for .gpkg format.")
-                df.to_file(tmp.name, driver="GPKG")
-            else:
-                raise ValueError(f"Unsupported file extension: {extension}")
-
-            # create new version (let's just keep the date as version name?)
-            dataset_version_name = datetime.now().strftime("%Y-%m-%d_%H:%M")
-            new_version = dataset.create_version(dataset_version_name)
-            new_version.add_file(tmp.name, filename=f"{fname}.{extension}")
-
-        current_run.log_info(
-            f"File {fname}.{extension} saved in new dataset version: {dataset_version_name}"
-        )
-    except Exception as e:
-        raise Exception(f"Error while saving the dataset version: {e}") from e
 
 
 def select_data_elements(data_element_ids: list[str], data_elements: list[str]) -> list[str] | None:
