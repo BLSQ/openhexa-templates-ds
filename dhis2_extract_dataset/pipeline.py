@@ -1,15 +1,11 @@
 """Template for newly generated pipelines."""
 
 import json
-import re
-import tempfile
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-import geopandas as gpd
 import pandas as pd
-import polars as pl
 from openhexa.sdk import Dataset, workspace
 from openhexa.sdk.pipelines import current_run, parameter, pipeline
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
@@ -767,86 +763,6 @@ def get_dataelements_with_no_data(retrieve_dataelements: list[str], dataset: dic
             f"The following data elements have no data: {missing_dataelements} for {dataset_name}"
         )
     return missing_dataelements
-
-
-# add the data to the dataset
-def add_to_dataset(table: pd.DataFrame, dhis2_connection: DHIS2, dataset: Dataset):
-    """Adds the given table data to a dataset in DHIS2.
-
-    Args:
-        table (pd.DataFrame): The table data to be added to the dataset.
-        dhis2_connection (DHIS2): The DHIS2 connection object.
-        dataset (Dataset): The dataset object to which the data will be added.
-
-    """
-    # we do not have access to the connection slug, so we use the url sub-domain instead..
-    # for the moment
-    subdomain = urlparse(dhis2_connection.url).netloc.split(".")[0]
-    dataset_name = f"{subdomain.replace('-', '_')}_dataset_extraction"
-    if dataset is None:
-        dataset = search_dataset(dataset_name)
-        if dataset is None:
-            dataset = workspace.create_dataset(dataset_name, "dataset extraction")  # Create dataset
-    add_data_to_dataset(data=table, dataset=dataset, fname=dataset_name, extension="csv")
-
-
-def search_dataset(dataset_name: str) -> Dataset | None:
-    """Searches for a dataset with the given name in the workspace.
-
-    Args:
-        dataset_name (str): The name of the dataset to search for.
-
-    Returns:
-        dataset: The dataset object if found, None otherwise.
-    """
-    try:
-        dataset = workspace.get_dataset(dataset_name)
-    except Exception:
-        current_run.log_error(f"Dataset {dataset_name} not found")
-        return None
-    return dataset
-
-
-def add_data_to_dataset(
-    data: pd.DataFrame | gpd.GeoDataFrame | pl.DataFrame,
-    dataset: Dataset,
-    fname: str,
-    extension: str = "csv",
-):
-    """Add files to a dataset by creating a new version."""
-    try:
-        if isinstance(data, pd.DataFrame):
-            df = data
-        elif isinstance(data, gpd.GeoDataFrame):
-            df = data
-        elif isinstance(data, pl.DataFrame):
-            df = data.to_pandas()  # Convert polars dataFrame to pandas
-        else:
-            raise ValueError("Input data must be a DataFrame, GeoDataFrame or Polars DataFrame.")
-
-        # Add file to dataset version
-        with tempfile.NamedTemporaryFile(suffix=f".{extension}") as tmp:
-            if extension == "parquet":
-                df.to_parquet(tmp.name)
-            elif extension == "csv":
-                df.to_csv(tmp.name, index=False)
-            elif extension == "gpkg":
-                if not isinstance(df, gpd.GeoDataFrame):
-                    raise ValueError("GeoDataFrame required for .gpkg format.")
-                df.to_file(tmp.name, driver="GPKG")
-            else:
-                raise ValueError(f"Unsupported file extension: {extension}")
-
-            # create new version (let's just keep the date as version name?)
-            dataset_version_name = datetime.now().strftime("%Y-%m-%d_%H:%M")
-            new_version = dataset.create_version(dataset_version_name)
-            new_version.add_file(tmp.name, filename=f"{fname}.{extension}")
-
-        current_run.log_info(
-            f"File {fname}.{extension} saved in new dataset version: {dataset_version_name}"
-        )
-    except Exception as e:
-        raise Exception(f"Error while saving the dataset version: {e}") from e
 
 
 def select_data_elements(data_element_ids: list[str], data_elements: list[str]) -> list[str] | None:
