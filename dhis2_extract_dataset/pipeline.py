@@ -42,6 +42,7 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=True,
     default="2024-01-01",
 )
+@parameter("dataset", name="OUTPUT: Openhexa dataset", type=Dataset, required=True)
 @parameter(
     "end",
     name="End Date (ISO format)",
@@ -50,7 +51,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=False,
     default=None,
 )
-@parameter("dataset", name="OUTPUT: Openhexa dataset", type=Dataset, required=True)
 @parameter(
     "data_element_ids",
     type=str,
