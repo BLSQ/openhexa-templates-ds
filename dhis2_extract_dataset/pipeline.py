@@ -1,6 +1,7 @@
 """Template for newly generated pipelines."""
 
 import json
+import re
 import tempfile
 from datetime import date, datetime
 from pathlib import Path
@@ -26,6 +27,14 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=True,
 )
 @parameter(
+    "dataset_id",
+    name="INPUT: DHIS2 dataset",
+    type=str,
+    widget=DHIS2Widget.DATASETS,
+    connection="dhis_con",
+    required=True,
+)
+@parameter(
     "start",
     name="Start Date (ISO format)",
     help="ISO format: yyyy-mm-dd",
@@ -41,15 +50,7 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=False,
     default=None,
 )
-@parameter(
-    "datasets_ids",
-    type=str,
-    widget=DHIS2Widget.DATASETS,
-    connection="dhis_con",
-    multiple=True,
-    default=["TuL8IOPzpHh"],
-    required=True,
-)
+@parameter("dataset", name="OUTPUT: Openhexa dataset", type=Dataset, required=True)
 @parameter(
     "data_element_ids",
     type=str,
@@ -57,16 +58,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     connection="dhis_con",
     multiple=True,
     required=False,
-    default=["FvKdfA2SuWI", "p1MDHOT6ENy"],
-)
-@parameter(
-    "ou_level",
-    name="Orgunit level",
-    widget=DHIS2Widget.ORG_UNIT_LEVELS,
-    connection="dhis_con",
-    type=int,
-    required=False,
-    default=None,
 )
 @parameter(
     "ou_ids",
@@ -97,6 +88,15 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     default=None,
 )
 @parameter(
+    "ou_level",
+    name="Orgunit level",
+    widget=DHIS2Widget.ORG_UNIT_LEVELS,
+    connection="dhis_con",
+    type=int,
+    required=False,
+    default=None,
+)
+@parameter(
     "use_cache",
     name="Use already extracted data if available",
     help="If true, the pipeline will use already extracted data if available.",
@@ -109,7 +109,8 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
 @parameter("add_org_unit_parent", type=bool, required=False, default=True)
 def dhis2_extract_dataset(
     dhis_con: DHIS2Connection,
-    datasets_ids: list[str],
+    dataset: Dataset,
+    dataset_id: str,
     data_element_ids: list[str] | None,
     ou_group_ids: list[str] | None,
     ou_ids: list[str] | None,
@@ -137,16 +138,16 @@ def dhis2_extract_dataset(
     selected_ous = select_ous(
         dhis, ous, ou_ids, ou_group_ids, ou_level, include_children, conditions
     )
-    data_element_ids = warning_request(datasets_ids, ds, data_element_ids, ous, dhis)
-    dhis2_name = create_extraction_folder(dhis2_name, ds, datasets_ids)
+    data_element_ids = warning_request([dataset_id], ds, data_element_ids, ous, dhis)
+    dhis2_name = create_extraction_folder(dhis2_name, ds, [dataset_id])
     table = extract_raw_data(
-        dhis, dhis2_name, use_cache, selected_ous, datasets_ids, ds, start, end, data_element_ids
+        dhis, dhis2_name, use_cache, selected_ous, [dataset_id], ds, start, end, data_element_ids
     )
     table = enrich_data(
         dhis, dhis2_name, ous, table, add_dx_name, add_org_unit_parent, add_coc_name
     )
-    warning_post_extraction(table, ds, datasets_ids, start, end)
-    save_table(table, dhis2_name)
+    warning_post_extraction(table, ds, [dataset_id], start, end)
+    save_table(table, dhis2_name, dataset)
 
 
 @dhis2_extract_dataset.task
@@ -203,18 +204,35 @@ def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:  # noqa: D417
 
 
 @dhis2_extract_dataset.task
-def save_table(table: pd.DataFrame, dhis2_name: str):
+def save_table(table: pd.DataFrame, dhis2_name: str, dataset: Dataset):
     """Saves the given table to DHIS2 and optionally to the OH database.
 
     Args:
         table (pd.DataFrame): The table to be saved.
         dhis2_name (str): The name of the DHIS2 instance.
+        dataset (Dataset): The OpenHexa dataset where the table will be saved.
         openhexa_dataset (Dataset | None): The OpenHexa dataset to save the table to. If None,
         the table will not be saved to the OpenHexa database.
     """
     table.to_csv(f"{workspace.files_path}/{dhis2_name}/dataset_extraction.csv", index=False)
     current_run.add_file_output(f"{workspace.files_path}/{dhis2_name}/dataset_extraction.csv")
     current_run.log_info(f"Output: {workspace.files_path}/{dhis2_name}/dataset_extraction.csv")
+    dataset_name = table["dataset"].unique()[0]
+    now = datetime.now()
+    date_time = now.strftime("%m/%d/%Y, %H:%M:%S")
+    version = dataset.create_version(name=date_time)
+    if not ((dhis2_name in dataset.description) and (dataset_name in dataset.description)):
+        dataset.description = (
+            f"DO NOT WITHDRAW THIS LINE: DHIS2: {dhis2_name} - dataset:\
+        {dataset_name}\n-----------------\nAdditional description below:"
+            + dataset.description
+        )
+    table = parse_period_column(table)
+    for dx_name in table.dx_name.unique():
+        table[table.dx_name == dx_name].to_csv(
+            f"{workspace.files_path}/{dhis2_name}/{dataset_name}/{dx_name}.csv"
+        )
+        version.add_file(f"{workspace.files_path}/{dhis2_name}/{dataset_name}/{dx_name}.csv")
 
 
 @dhis2_extract_dataset.task
@@ -608,6 +626,60 @@ def enrich_data(
             table = table.drop(columns=["level", "geometry", "path"])
 
     return table
+
+
+def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:
+    """Parse and standardize the 'period' column in a DataFrame.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing a 'period' column.
+
+    Returns:
+        pd.DataFrame: The DataFrame with the 'period' column parsed into a standardized datetime
+        format.
+
+    Raises:
+        ValueError: If the 'period' column contains an unrecognized format.
+    """
+    # Only process if "period" exists
+    if "period" not in df.columns:
+        return df
+
+    sample_value = str(df["period"].dropna().iloc[0])
+
+    # Define format checkers
+    known_formats = [
+        ("%Y-%m-%d", lambda v: re.fullmatch(r"\d{4}-\d{2}-\d{2}", v)),
+        ("%Y%m", lambda v: re.fullmatch(r"\d{6}", v)),
+        ("%Y", lambda v: re.fullmatch(r"\d{4}", v)),
+        ("%YQ%q", lambda v: re.fullmatch(r"\d{4}Q[1-4]", v)),  # custom handled
+    ]
+
+    for fmt, checker in known_formats:
+        if checker(sample_value):
+            if fmt == "%YQ%q":
+                # Custom parse YYYYQq (e.g., "2024Q2")
+                df["period"] = df["period"].apply(_parse_quarter)
+            else:
+                df["period"] = pd.to_datetime(df["period"], format=fmt)
+            return df
+
+    # Fallback to automatic parsing
+    try:
+        df["period"] = pd.to_datetime(df["period"])
+    except Exception:
+        raise ValueError(f"Unrecognized period format: {sample_value}") from None
+
+    return df
+
+
+def _parse_quarter(qstr: str) -> pd.Timestamp:
+    match = re.match(r"(\d{4})Q([1-4])", qstr)
+    if not match:
+        raise ValueError(f"Invalid quarter format: {qstr}")
+    year, quarter = int(match.group(1)), int(match.group(2))
+    month = (quarter - 1) * 3 + 1
+    return pd.Timestamp(year=year, month=month, day=1)
 
 
 def is_iso_date(date_str: str) -> bool:
