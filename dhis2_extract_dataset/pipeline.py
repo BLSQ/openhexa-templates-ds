@@ -104,9 +104,9 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=True,
     default=True,
 )
-@parameter("add_dx_name", type=bool, required=False, default=True)
-@parameter("add_coc_name", type=bool, required=False, default=True)
-@parameter("add_org_unit_parent", type=bool, required=False, default=True)
+@parameter("add_dx_name", name="Add data element names", type=bool, default=True)
+@parameter("add_coc_name", name="Add Category Option Combo names", type=bool, default=True)
+@parameter("add_org_unit_parent", name="Add orgunits parents", type=bool, default=True)
 def dhis2_extract_dataset(
     dhis_con: DHIS2Connection,
     dataset: Dataset,
@@ -229,10 +229,10 @@ def save_table(table: pd.DataFrame, dhis2_name: str, dataset: Dataset):
         )
     table = parse_period_column(table)
     for dx_name in table.dx_name.unique():
-        table[table.dx_name == dx_name].to_csv(
-            f"{workspace.files_path}/{dhis2_name}/{dataset_name}/{dx_name}.csv"
-        )
-        version.add_file(f"{workspace.files_path}/{dhis2_name}/{dataset_name}/{dx_name}.csv")
+        output_file = f"{dx_name}.csv"
+        output_path = f"{workspace.files_path}/{dhis2_name}/{dataset_name}/{output_file}"
+        table[table.dx_name == dx_name].to_csv(output_path, index=False)
+        version.add_file(source=output_path, filename=f"{dx_name}.csv")
 
 
 @dhis2_extract_dataset.task
