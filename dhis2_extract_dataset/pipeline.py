@@ -281,7 +281,7 @@ def parameters_validation(
         and not isinstance(ou_level, int),
         "ou_level only": isinstance(ou_level, int) and len(ou_ids) == 0 and len(ou_group_ids) == 0,
     }
-    if sum([1 for condition in conditions.values() if condition]) != 1:
+    if sum([1 for condition in conditions.values() if condition]) > 1:
         current_run.log_error(
             "Invalid orgunit filter: choose only one option among "
             "(1) ou_ids, (2) ou_group_ids, (3) ou_level"
@@ -344,6 +344,8 @@ def select_ous(
         for ou in all_ous:
             if ou["level"] == ou_level:
                 selected_ou_ids.add(ou["id"])
+    else:
+        selected_ou_ids = {ou["id"] for ou in all_ous}
     return selected_ou_ids
 
 
