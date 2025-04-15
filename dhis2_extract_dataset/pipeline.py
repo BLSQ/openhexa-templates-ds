@@ -637,51 +637,16 @@ def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:
         df (pd.DataFrame): The input DataFrame containing a 'period' column.
 
     Returns:
-        pd.DataFrame: The DataFrame with the 'period' column parsed into a standardized datetime
-        format.
+        pd.DataFrame: The DataFrame with the 'period' column parsed into a standardized
+        datetime format.
 
     Raises:
         ValueError: If the 'period' column contains an unrecognized format.
     """
-    # Only process if "period" exists
-    if "period" not in df.columns:
+    if "pe" not in df.columns:
         return df
-
-    sample_value = str(df["period"].dropna().iloc[0])
-
-    # Define format checkers
-    known_formats = [
-        ("%Y-%m-%d", lambda v: re.fullmatch(r"\d{4}-\d{2}-\d{2}", v)),
-        ("%Y%m", lambda v: re.fullmatch(r"\d{6}", v)),
-        ("%Y", lambda v: re.fullmatch(r"\d{4}", v)),
-        ("%YQ%q", lambda v: re.fullmatch(r"\d{4}Q[1-4]", v)),  # custom handled
-    ]
-
-    for fmt, checker in known_formats:
-        if checker(sample_value):
-            if fmt == "%YQ%q":
-                # Custom parse YYYYQq (e.g., "2024Q2")
-                df["period"] = df["period"].apply(_parse_quarter)
-            else:
-                df["period"] = pd.to_datetime(df["period"], format=fmt)
-            return df
-
-    # Fallback to automatic parsing
-    try:
-        df["period"] = pd.to_datetime(df["period"])
-    except Exception:
-        raise ValueError(f"Unrecognized period format: {sample_value}") from None
-
+    df["pe"] = df["pe"].map(lambda x: period_from_string(x).datetime)
     return df
-
-
-def _parse_quarter(qstr: str) -> pd.Timestamp:
-    match = re.match(r"(\d{4})Q([1-4])", qstr)
-    if not match:
-        raise ValueError(f"Invalid quarter format: {qstr}")
-    year, quarter = int(match.group(1)), int(match.group(2))
-    month = (quarter - 1) * 3 + 1
-    return pd.Timestamp(year=year, month=month, day=1)
 
 
 def is_iso_date(date_str: str) -> bool:
