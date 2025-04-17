@@ -1,6 +1,8 @@
 """Template for newly generated pipelines."""
 
 import json
+import os
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -12,6 +14,7 @@ from openhexa.sdk.pipelines.parameter import DHIS2Widget
 from openhexa.sdk.workspaces.connection import DHIS2Connection
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.periods import Period, period_from_string
+from sqlalchemy import create_engine
 
 
 @pipeline("dhis2_extract_dataset")
@@ -48,14 +51,6 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     default=None,
 )
 @parameter(
-    "data_element_ids",
-    type=str,
-    widget=DHIS2Widget.DATA_ELEMENTS,
-    connection="dhis_con",
-    multiple=True,
-    required=False,
-)
-@parameter(
     "ou_ids",
     name="Orgunits",
     widget=DHIS2Widget.ORG_UNITS,
@@ -83,41 +78,15 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
     required=False,
     default=None,
 )
-@parameter(
-    "ou_level",
-    name="Orgunit level",
-    widget=DHIS2Widget.ORG_UNIT_LEVELS,
-    connection="dhis_con",
-    type=int,
-    required=False,
-    default=None,
-)
-@parameter(
-    "use_cache",
-    name="Use already extracted data if available",
-    help="If true, the pipeline will use already extracted data if available.",
-    type=bool,
-    required=True,
-    default=True,
-)
-@parameter("add_dx_name", name="Add data element names", type=bool, default=True)
-@parameter("add_coc_name", name="Add Category Option Combo names", type=bool, default=True)
-@parameter("add_org_unit_parent", name="Add orgunits parents", type=bool, default=True)
 def dhis2_extract_dataset(
     dhis_con: DHIS2Connection,
     dataset: Dataset,
     dataset_id: str,
-    data_element_ids: list[str] | None,
     ou_group_ids: list[str] | None,
     ou_ids: list[str] | None,
-    ou_level: int | None,
     include_children: bool,
     start: str,
     end: str | None,
-    use_cache: bool,
-    add_dx_name: bool,
-    add_org_unit_parent: bool,
-    add_coc_name: bool,
 ):
     """Write your pipeline orchestration here.
 
@@ -130,19 +99,24 @@ def dhis2_extract_dataset(
     dhis2_name = get_dhis2_name_domain(dhis_con)
     ds = get_datasets(dhis, dhis2_name)
     ous = get_ous(dhis)
-    conditions = parameters_validation(ou_ids, ou_group_ids, ou_level)
-    selected_ous = select_ous(
-        dhis, ous, ou_ids, ou_group_ids, ou_level, include_children, conditions
-    )
-    data_element_ids = warning_request([dataset_id], ds, data_element_ids, ous, dhis)
-    dhis2_name = create_extraction_folder(dhis2_name, ds, [dataset_id])
+    conditions = parameters_validation(ou_ids, ou_group_ids)
+    selected_ous = select_ous(dhis, ous, ou_ids, ou_group_ids, include_children, conditions)
+    selected_ous = warning_request(dataset_id, ds, ous, selected_ous)
+    dhis2_name = create_extraction_folder(dhis2_name, ds, dataset_id)
     table = extract_raw_data(
-        dhis, dhis2_name, use_cache, selected_ous, [dataset_id], ds, start, end, data_element_ids
+        dhis,
+        selected_ous,
+        dataset_id,
+        ds,
+        start,
+        end,
+        ou_ids,
+        ou_group_ids,
+        include_children,
+        conditions,
     )
-    table = enrich_data(
-        dhis, dhis2_name, ous, table, add_dx_name, add_org_unit_parent, add_coc_name
-    )
-    warning_post_extraction(table, ds, [dataset_id], start, end)
+    table = enrich_data(dhis, dhis2_name, ous, table)
+    warning_post_extraction(table, ds, dataset_id, start, end)
     save_table(table, dhis2_name, dataset)
 
 
@@ -165,21 +139,21 @@ def get_dhis2_name_domain(dhis_con: DHIS2Connection) -> str:
 
 
 @dhis2_extract_dataset.task
-def create_extraction_folder(dhis2_name: str, ds: dict, ids: list[str]) -> str:
+def create_extraction_folder(dhis2_name: str, datasets: dict, dataset_id: str) -> str:
     """Creates a folder structure for data extraction.
 
     Args:
         dhis2_name (str): The name of the DHIS2 instance.
-        ds (dict): A dictionary containing dataset information.
-        ids (list[str]): A list of dataset IDs.
+        datasets (dict): A dictionary containing dataset information.
+        dataset_id (str): A dataset ID.
 
     Returns:
         str: The name of the DHIS2 instance.
     """
-    Path(f"{workspace.files_path}/{dhis2_name}").mkdir(parents=True, exist_ok=True)
-    for i in ids:
-        name = ds[i]["name"].replace("/", "-").replace("\\", "-")
-        Path(f"{workspace.files_path}/{dhis2_name}/{name}").mkdir(parents=True, exist_ok=True)
+    name = datasets[dataset_id]["name"].replace("/", "-").replace("\\", "-")
+    Path(f"{workspace.files_path}/pipelines/dhis2_extract_dataset/{dhis2_name}/{name}").mkdir(
+        parents=True, exist_ok=True
+    )
     return dhis2_name
 
 
@@ -196,7 +170,7 @@ def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:  # noqa: D417
         DHIS2: The created DHIS2 object.
 
     """
-    return DHIS2(dhis_con)
+    return DHIS2(dhis_con, cache_dir=".cache")
 
 
 @dhis2_extract_dataset.task
@@ -210,51 +184,61 @@ def save_table(table: pd.DataFrame, dhis2_name: str, dataset: Dataset):
         openhexa_dataset (Dataset | None): The OpenHexa dataset to save the table to. If None,
         the table will not be saved to the OpenHexa database.
     """
-    table.to_csv(f"{workspace.files_path}/{dhis2_name}/dataset_extraction.csv", index=False)
-    current_run.add_file_output(f"{workspace.files_path}/{dhis2_name}/dataset_extraction.csv")
-    current_run.log_info(f"Output: {workspace.files_path}/{dhis2_name}/dataset_extraction.csv")
-    dataset_name = table["dataset"].unique()[0]
-    now = datetime.now()
-    date_time = now.strftime("%m/%d/%Y, %H:%M:%S")
-    version = dataset.create_version(name=date_time)
-    if not ((dhis2_name in dataset.description) and (dataset_name in dataset.description)):
-        dataset.description = (
-            f"DO NOT WITHDRAW THIS LINE: DHIS2: {dhis2_name} - dataset:\
-        {dataset_name}\n-----------------\nAdditional description below:"
-            + dataset.description
-        )
+    dataset_name = table.dataset.unique()[0]
     table = parse_period_column(table)
+    now = datetime.now()
+    date_time = now.strftime("%m/%d/%Y, %H:%M:%S").replace("/", "-")
+    table.to_csv(
+        f"{workspace.files_path}/pipelines/dhis2_extract_dataset/{dhis2_name}/{dataset_name}/{date_time}.csv",
+        index=False,
+    )
+    table.to_parquet(
+        f"{workspace.files_path}/pipelines/dhis2_extract_dataset/{dhis2_name}/{dataset_name}/{date_time}.parquet",
+        index=False,
+    )
+    current_run.add_file_output(
+        f"{workspace.files_path}/pipelines/dhis2_extract_dataset/{dhis2_name}/{dataset_name}/{date_time}.csv",
+    )
+    current_run.add_file_output(
+        f"{workspace.files_path}/pipelines/dhis2_extract_dataset/{dhis2_name}/{dataset_name}/{date_time}.parquet",
+    )
+    current_run.log_info(f"Output: {workspace.files_path}/{dhis2_name}/dataset_extraction.csv")
+    version = dataset.create_version(name=date_time)
+
     for dx_name in table.dx_name.unique():
-        output_file = f"{dx_name}.csv"
-        output_path = f"{workspace.files_path}/{dhis2_name}/{dataset_name}/{output_file}"
-        table[table.dx_name == dx_name].to_csv(output_path, index=False)
-        version.add_file(source=output_path, filename=f"{dx_name}.csv")
+        with tempfile.NamedTemporaryFile(suffix=".parquet", delete=False) as tmp_file:
+            temp_path = tmp_file.name
+            table[table.dx_name == dx_name].to_parquet(temp_path, engine="pyarrow")
+            version.add_file(source=tmp_file.name, filename=f"{dx_name}.parquet")
+
+    engine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    current_run.log_info(f"Table '{dataset_name}' saved in the workspace database: ")
+    table.to_sql(dataset_name, con=engine, if_exists="replace")
 
 
 @dhis2_extract_dataset.task
 def warning_post_extraction(
-    table: pd.DataFrame, datasets: dict, ids: list[str], start: str, end: str
+    table: pd.DataFrame, datasets: dict, dataset_id: str, start: str, end: str
 ):
     """Check for warnings in the extracted data.
 
     Args:
         table (pd.DataFrame): The extracted data.
         datasets (dict): Dictionary containing dataset information.
-        ids (list[str]): List of dataset IDs.
+        dataset_id (str): List of dataset IDs.
         start (str): Start date of the extraction.
         end (str): End date of the extraction.
 
     """
     if len(table) > 0:
         periods = [str(p) for p in table["pe"].unique()]
-        for i in ids:
-            get_periods_with_no_data(periods, start, end, datasets[i])
-            get_dataelements_with_no_data(table["dx"].unique(), datasets[i])
+        get_periods_with_no_data(periods, start, end, datasets[dataset_id])
+        get_dataelements_with_no_data(table["dx"].unique(), datasets[dataset_id])
 
 
 @dhis2_extract_dataset.task
 def parameters_validation(
-    ou_ids: list[str] | None, ou_group_ids: list[str] | None, ou_level: int | None
+    ou_ids: list[str] | None, ou_group_ids: list[str] | None
 ) -> dict[str, bool]:
     """Validates the parameters for organizational unit selection.
 
@@ -269,22 +253,17 @@ def parameters_validation(
     conditions = {
         "ou_ids + include_children": isinstance(ou_ids, list)
         and len(ou_ids) > 0
-        and len(ou_group_ids) == 0
-        and not isinstance(ou_level, int),
+        and len(ou_group_ids) == 0,
         "ou_group_ids only": isinstance(ou_group_ids, list)
         and len(ou_group_ids) > 0
-        and len(ou_ids) == 0
-        and not isinstance(ou_level, int),
-        "ou_level only": isinstance(ou_level, int) and len(ou_ids) == 0 and len(ou_group_ids) == 0,
+        and len(ou_ids) == 0,
     }
     if sum([1 for condition in conditions.values() if condition]) > 1:
         current_run.log_error(
-            "Invalid orgunit filter: choose only one option among "
-            "(1) ou_ids, (2) ou_group_ids, (3) ou_level"
+            "Invalid orgunit filter: choose only one option among (1) ou_ids, (2) ou_group_ids"
         )
         raise ValueError(
-            "Invalid orgunit filter: choose only one option among "
-            "(1) ou_ids, (2) ou_group_ids, (3) ou_level"
+            "Invalid orgunit filter: choose only one option among (1) ou_ids, (2) ou_group_ids"
         )
     return conditions
 
@@ -295,7 +274,6 @@ def select_ous(
     all_ous: list[dict],
     ou_ids: list[str] | None,
     ou_group_ids: list[str] | None,
-    ou_level: int | None,
     include_children: bool,
     conditions: list[bool],
 ) -> list[dict]:
@@ -306,7 +284,6 @@ def select_ous(
         all_ous (list[dict]): A list of all organizational units.
         ou_ids (list[str] | None): List of organization unit IDs or None.
         ou_group_ids (list[str] | None): List of organization unit group IDs or None.
-        ou_level (int | None): Level of organization units or None.
         include_children (bool): Whether to include child organizational units.
         conditions (list[bool]): Validation conditions for the parameters.
 
@@ -335,11 +312,6 @@ def select_ous(
         print(ous_in_group_ids)
         for ou in ous_in_group_ids:
             selected_ou_ids.add(ou)
-
-    elif conditions["ou_level only"]:
-        for ou in all_ous:
-            if ou["level"] == ou_level:
-                selected_ou_ids.add(ou["id"])
     else:
         selected_ou_ids = {ou["id"] for ou in all_ous}
     return selected_ou_ids
@@ -347,57 +319,40 @@ def select_ous(
 
 @dhis2_extract_dataset.task
 def warning_request(
-    ids: list[str], datasets: dict, data_element_ids: list[str], ous: list[str], dhis: DHIS2
+    dataset_id: str, datasets: dict, ous: list[str], selected_ou_ids: set
 ) -> set | None:
     """Check for warnings in the datasets.
 
     Args:
-        ids (list): List of dataset IDs.
+        dataset_id (str): dataset ID.
         datasets (dict): Dictionary containing dataset information.
-        data_element_ids (list): List of data element IDs.
         ous (list): List of organisation unit IDs.
-        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
+        selected_ou_ids (set): set of orgunit ids selected by the parameters.
 
     Returns:
         set or None: If `data_element_ids` is a non-empty list, returns a set of all data elements
         associated with the datasets that are not in `data_element_ids`. Otherwise, returns None.
     """
-    for ds_id in ids:
-        if ds_id not in datasets:
-            current_run.log_error(f"Dataset id: {ds_id} not found in thius DHIS2 instance.")
-            raise ValueError(f"Dataset id: {ds_id} not found in thius DHIS2 instance.")
-    levels = {level for i in ids for level in get_levels(ous, datasets[i]["organisation_units"])}
-    frequencies = {datasets[i]["periodType"] for i in ids}
+    if dataset_id not in datasets:
+        current_run.log_error(f"Dataset id: {dataset_id} not found in this DHIS2 instance.")
+        raise ValueError(f"Dataset id: {dataset_id} not found in this DHIS2 instance.")
+    levels = {level for level in get_levels(ous, datasets[dataset_id]["organisation_units"])}
     if len(levels) > 1:
         current_run.log_warning(
             f"The orgunits associated to your datasets have mixed levels : {levels}"
         )
-    if len(frequencies) > 1:
+    datasets_ous = {ou for ou in datasets[dataset_id]["organisation_units"]}
+    dataset_ous_intersection = selected_ou_ids.intersection(datasets_ous)
+    if len(dataset_ous_intersection) != len(selected_ou_ids):
         current_run.log_warning(
-            f"The frequency associated to your datasets are mixed : {frequencies}"
+            f"Only {len(dataset_ous_intersection)} orgunits out of {len(selected_ou_ids)} \
+            selected are associated to the datasets."
         )
-    if isinstance(data_element_ids, list) and len(data_element_ids) > 0:
-        if dhis.version < "2.39":
-            current_run.log_warning(
-                f"Impossible to filter on data elements the DHIS2 API for versions {dhis.version}."
-            )
-            return []
-
-        all_data_elements = {dx for i in ids for dx in datasets[i]["data_elements"]}
-        unmatched_data_elements = set(data_element_ids) - all_data_elements
-        if len(unmatched_data_elements) > 0:
+        if len(dataset_ous_intersection) == 0:
             current_run.log_error(
-                f"Data elements {unmatched_data_elements} are not associated to any dataset"
+                f"No orgunits associated to the datasets {datasets[dataset_id]['name']}."
             )
-            if len(unmatched_data_elements) == len(data_element_ids):
-                current_run.log_error(
-                    f"All data elements {data_element_ids} are not associated to any dataset"
-                )
-                raise ValueError(
-                    f"None of the data elements {data_element_ids} are associated any dataset"
-                )
-        return all_data_elements.intersection(set(data_element_ids))
-    return None
+    return dataset_ous_intersection
 
 
 @dhis2_extract_dataset.task
@@ -454,29 +409,30 @@ def valid_date(date_str: str | None) -> str:
 @dhis2_extract_dataset.task
 def extract_raw_data(
     dhis: DHIS2,
-    dhis2_name: str,
-    use_cache: bool,
     selected_ou_ids: set,
-    datasets_ids: list[str],
+    dataset_id: str,
     datasets: dict,
     start: str,
     end: str,
-    data_element_ids: list[str] | None = None,
+    ou_ids: list[str] | None,
+    ou_group_ids: list[str] | None,
+    include_children: bool,
+    conditions: list[bool],
 ) -> pd.DataFrame:
     """Extracts raw data from DHIS2 for the given datasets and time range.
 
     Args:
         dhis (DHIS2): DHIS2 client object used to interact with the DHIS2 API.
-        dhis2_name (str): The name of the DHIS2 instance.
-        use_cache (bool): Use already extracted data.
         selected_ou_ids (set): Set of selected organization unit IDs to extract data for.
-        datasets_ids (list[str]): List of dataset IDs to extract data from.
+        dataset_id (str): dataset ID to extract data from.
         datasets (dict): Dictionary containing dataset information, including data elements and
         organisation units.
         start (str): Start date of the time range to extract data from.
         end (str): End date of the time range to extract data from.
-        data_element_ids (list[str] | None): Optional list of data element IDs to filter the
-        extracted data. If None, all data elements will be included.
+        ou_ids (list[str] | None): List of organization unit IDs or None.
+        ou_group_ids (list[str] | None): List of organization unit group IDs or None.
+        include_children (bool): Whether to include child organizational units.
+        conditions (list[bool]): Validation conditions for the parameters.
 
     Returns:
         pd.DataFrame: Pandas DataFrame containing the extracted raw data, with additional columns
@@ -485,100 +441,39 @@ def extract_raw_data(
     start_init = start
     end_init = end
     res = pd.DataFrame()
-    for ds_id in datasets_ids:
-        selected_data_elements = select_data_elements(
-            data_element_ids, datasets[ds_id]["data_elements"]
-        )
-        datasets_ous = {ou for ou in datasets[ds_id]["organisation_units"]}
-        dataset_ous_intersection = selected_ou_ids.intersection(datasets_ous)
-        if len(dataset_ous_intersection) != len(selected_ou_ids):
-            current_run.log_warning(
-                f"Only {len(dataset_ous_intersection)} orgunits out of {len(selected_ou_ids)} \
-                selected are associated to the datasets."
+    period_type = datasets[dataset_id]["periodType"]
+    start = isodate_to_period_type(start_init, period_type)
+    end = isodate_to_period_type(end_init, period_type)
+    current_run.log_info(f"Extracting data for dataset {datasets[dataset_id]['name']}")
+    for pe in start.get_range(end):
+        if conditions["ou_ids + include_children"]:
+            data_values = dhis.data_value_sets.get(
+                datasets=[dataset_id],
+                org_units=ou_ids,
+                children=include_children,
+                periods=[pe],
             )
-            if len(dataset_ous_intersection) == 0:
-                current_run.log_error(
-                    f"No orgunits associated to the datasets {datasets[ds_id]['name']}."
-                )
-                continue
-        period_type = datasets[ds_id]["periodType"]
-        start = isodate_to_period_type(start_init, period_type)
-        end = isodate_to_period_type(end_init, period_type)
-        current_run.log_info(f"Extracting data for dataset {datasets[ds_id]['name']}")
-        if (
-            dhis.version >= "2.39"
-            and selected_data_elements is not None
-            and len(selected_data_elements) > 0
-        ):
-            for dx in selected_data_elements:
-                dx_name = (
-                    dhis.meta.data_elements(fields="id,name", filters={f"id:eq:{dx}"})[0]["name"]
-                    .replace("/", "-")
-                    .replace("\\", "-")
-                )
-                Path(
-                    f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}"
-                ).mkdir(parents=True, exist_ok=True)
-                for pe in start.get_range(end):
-                    if (
-                        Path(
-                            f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
-                        ).exists()
-                        and use_cache
-                    ):
-                        df = pd.read_csv(
-                            f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
-                        )
-                    else:
-                        data_values = dhis.data_value_sets.get(
-                            datasets=[ds_id],
-                            data_elements=[dx],
-                            org_units=list(dataset_ous_intersection),
-                            periods=[pe],
-                        )
-                        df = pd.DataFrame(data_values)
-                        if df.empty:
-                            current_run.log_warning(f"No data for {dx_name} for period {pe}")
-                            continue
-                        df["dataset"] = datasets[ds_id]["name"]
-                        df["periodType"] = datasets[ds_id]["periodType"]
-                        df.to_csv(
-                            f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
-                        )
-                        current_run.log_info(f"{dx_name} for period {pe} saved: {df.shape[0]} rows")
-                    res = pd.concat([res, df], ignore_index=True)
+        elif conditions["ou_group_ids only"]:
+            data_values = dhis.data_value_sets.get(
+                datasets=[dataset_id],
+                org_unit_groups=ou_group_ids,
+                periods=[pe],
+            )
         else:
-            for pe in start.get_range(end):
-                data_values = dhis.data_value_sets.get(
-                    datasets=[ds_id], org_units=list(dataset_ous_intersection), periods=[pe]
-                )
-                if len(data_values) == 0:
-                    current_run.log_warning(
-                        f"No data for {datasets[ds_id]['name']} for period {pe}"
-                    )
-                    continue
-                df = pd.DataFrame(data_values)
-                df["dataset"] = datasets[ds_id]["name"]
-                df["periodType"] = datasets[ds_id]["periodType"]
-                for dx in datasets[ds_id]["data_elements"]:
-                    df_dx = df[df["dataElement"] == dx]
-                    if df_dx.empty:
-                        continue
-                    dx_name = (
-                        dhis.meta.data_elements(fields="id,name", filters={f"id:eq:{dx}"})[0][
-                            "name"
-                        ]
-                        .replace("/", "-")
-                        .replace("\\", "-")
-                    )
-                    Path(
-                        f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}"
-                    ).mkdir(parents=True, exist_ok=True)
-                    df_dx.to_csv(
-                        f"{workspace.files_path}/{dhis2_name}/{datasets[ds_id]['name']}/{dx_name}/{pe}.csv"
-                    )
-                current_run.log_info(f"Data for period {pe} saved: {df.shape[0]} rows")
-                res = pd.concat([res, df], ignore_index=True)
+            data_values = dhis.data_value_sets.get(
+                datasets=[dataset_id],
+                org_units=list(selected_ou_ids),
+                periods=[pe],
+            )
+        df = pd.DataFrame(data_values)
+        if df.empty:
+            current_run.log_warning(f"No data for period {pe}")
+            continue
+
+        current_run.log_info(f"Data for period {pe} extracted: {df.shape[0]} rows")
+        res = pd.concat([res, df], ignore_index=True)
+    res["dataset"] = datasets[dataset_id]["name"]
+    res["periodType"] = datasets[dataset_id]["periodType"]
     return res
 
 
@@ -588,9 +483,6 @@ def enrich_data(
     dhis2_name: str,
     ous: list[dict],
     table: pd.DataFrame,
-    add_dx_name: bool,
-    add_org_unit_parent: bool,
-    add_coc_name: bool,
 ) -> pd.DataFrame:
     """Enriches the given table with additional columns based on the specified parameters.
 
@@ -611,17 +503,12 @@ def enrich_data(
     if length_table > 0:
         table = table.rename(columns={"dataElement": "dx", "orgUnit": "ou", "period": "pe"})
         table["pe"] = table["pe"].astype(str)
-        print(table.sample(1))
-        print(table.columns)
-        if add_dx_name:
-            table = dhis.meta.add_dx_name_column(table)
-        if add_coc_name:
-            table = dhis.meta.add_coc_name_column(table, "categoryOptionCombo")
-        if add_org_unit_parent:
-            # table = dhis.meta.add_org_unit_parent_columns(table)
-            ous = get_orgunits_with_parents(ous, dhis2_name)
-            table = add_parents(table, ous)
-            table = table.drop(columns=["level", "geometry", "path"])
+        table = dhis.meta.add_dx_name_column(table)
+        table = dhis.meta.add_coc_name_column(table, "categoryOptionCombo")
+        # table = dhis.meta.add_org_unit_parent_columns(table)
+        ous = get_orgunits_with_parents(ous, dhis2_name)
+        table = add_parents(table, ous)
+        table = table.drop(columns=["level", "geometry", "path"])
 
     return table
 
