@@ -101,7 +101,7 @@ def dhis2_extract_dataset(
     ous = get_ous(dhis)
     conditions = parameters_validation(ou_ids, ou_group_ids)
     selected_ous = select_ous(dhis, ous, ou_ids, ou_group_ids, include_children, conditions)
-    selected_ous = warning_request(dataset_id, ds, ous, selected_ous)
+    selected_ous = warning_request(dataset_id, ds, selected_ous)
     dhis2_name = create_extraction_folder(dhis2_name, ds, dataset_id)
     table = extract_raw_data(
         dhis,
@@ -202,7 +202,6 @@ def save_table(table: pd.DataFrame, dhis2_name: str, dataset: Dataset):
     current_run.add_file_output(
         f"{workspace.files_path}/pipelines/dhis2_extract_dataset/{dhis2_name}/{dataset_name}/{date_time}.parquet",
     )
-    current_run.log_info(f"Output: {workspace.files_path}/{dhis2_name}/dataset_extraction.csv")
     version = dataset.create_version(name=date_time)
 
     for dx_name in table.dx_name.unique():
@@ -212,7 +211,7 @@ def save_table(table: pd.DataFrame, dhis2_name: str, dataset: Dataset):
             version.add_file(source=tmp_file.name, filename=f"{dx_name}.parquet")
 
     engine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
-    current_run.log_info(f"Table '{dataset_name}' saved in the workspace database: ")
+    current_run.log_info(f"Table '{dataset_name}' saved in the workspace database")
     table.to_sql(dataset_name, con=engine, if_exists="replace")
 
 
@@ -260,10 +259,10 @@ def parameters_validation(
     }
     if sum([1 for condition in conditions.values() if condition]) > 1:
         current_run.log_error(
-            "Invalid orgunit filter: choose only one option among (1) ou_ids, (2) ou_group_ids"
+            "Please, choose only one option among (1) Orgunits, (2) Group(s) oforgunits"
         )
         raise ValueError(
-            "Invalid orgunit filter: choose only one option among (1) ou_ids, (2) ou_group_ids"
+            "Please, choose only one option among (1) Orgunits, (2) Group(s) of orgunits"
         )
     return conditions
 
@@ -318,9 +317,7 @@ def select_ous(
 
 
 @dhis2_extract_dataset.task
-def warning_request(
-    dataset_id: str, datasets: dict, ous: list[str], selected_ou_ids: set
-) -> set | None:
+def warning_request(dataset_id: str, datasets: dict, selected_ou_ids: set) -> set | None:
     """Check for warnings in the datasets.
 
     Args:
@@ -336,17 +333,13 @@ def warning_request(
     if dataset_id not in datasets:
         current_run.log_error(f"Dataset id: {dataset_id} not found in this DHIS2 instance.")
         raise ValueError(f"Dataset id: {dataset_id} not found in this DHIS2 instance.")
-    levels = {level for level in get_levels(ous, datasets[dataset_id]["organisation_units"])}
-    if len(levels) > 1:
-        current_run.log_warning(
-            f"The orgunits associated to your datasets have mixed levels : {levels}"
-        )
     datasets_ous = {ou for ou in datasets[dataset_id]["organisation_units"]}
     dataset_ous_intersection = selected_ou_ids.intersection(datasets_ous)
     if len(dataset_ous_intersection) != len(selected_ou_ids):
         current_run.log_warning(
             f"Only {len(dataset_ous_intersection)} orgunits out of {len(selected_ou_ids)} \
-            selected are associated to the datasets."
+            selected are associated to the datasets. If this is unexpected, verify the orgunits\
+            associated to the dataset {datasets[dataset_id]['name']} in your DHIS2 instance."
         )
         if len(dataset_ous_intersection) == 0:
             current_run.log_error(
@@ -467,7 +460,7 @@ def extract_raw_data(
             )
         df = pd.DataFrame(data_values)
         if df.empty:
-            current_run.log_warning(f"No data for period {pe}")
+            # current_run.log_warning(f"No data for period {pe}")
             continue
 
         current_run.log_info(f"Data for period {pe} extracted: {df.shape[0]} rows")
