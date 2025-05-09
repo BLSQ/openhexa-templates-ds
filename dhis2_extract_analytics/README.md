@@ -4,6 +4,10 @@
 
 This pipeline extracts analytics data from a DHIS2 instance, including data elements, indicators, and their associated metadata. The extracted data is processed and saved as a Parquet file for further analysis.
 
+## Example usage
+
+![Screenshot](docs/screenshot.png)
+
 ## Parameters
 
 | Parameter | Type | Required | Default | Description |
