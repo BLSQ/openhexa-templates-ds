@@ -15,7 +15,7 @@ from openhexa.toolbox.dhis2.dataframe import (
 )
 
 
-@pipeline("dhis2_extract_data_elements")
+@pipeline("dhis2-extract-data-elements")
 @parameter(
     code="src_dhis2",
     type=DHIS2Connection,
