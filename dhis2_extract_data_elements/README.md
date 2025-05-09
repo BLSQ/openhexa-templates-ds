@@ -4,6 +4,9 @@
 
 This pipeline extracts data values for specified data elements from a DHIS2 instance, processes the data, and saves it as a Parquet file.
 
+## Example usage
+
+![Screenshot](docs/screenshot.png)
 
 ## Parameters
 
