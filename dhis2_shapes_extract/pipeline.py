@@ -48,7 +48,7 @@ def dhis2_shapes_extract(
     current_run.log_info("Shapes pipeline started")
 
     if output_path is None:
-        output_path = Path(workspace.files_path).joinpath("pipelines", "dhis2_shapes_extract")
+        output_path = Path(workspace.files_path) / "pipelines" / "dhis2_shapes_extract"
         current_run.log_info(f"Output path not specified, using default {output_path}")
     else:
         output_path = Path(output_path)
@@ -58,26 +58,24 @@ def dhis2_shapes_extract(
         org_level = 1
 
     try:
-        dhis2_client = get_dhis2_client(dhis2_connection)
-
-        shapes = extract_shapes(dhis2_client, org_level)
-
-        save_shapes(
-            shapes=shapes,
-            output_path=output_path,
-            filename=f"shapes_level{org_level}_{datetime.now().strftime('%Y_%m_%d_%H%M')}.gpkg",
-        )
+        retrieve_shapes(dhis2_connection, org_level, output_path=output_path)
 
     except Exception as e:
-        current_run.log_error(f"Pipeline stopped: {e}")
+        current_run.log_error(f"Pipeline error: {e}")
 
 
-@dhis2_shapes_extract.task
 def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
     """Get the DHIS2 connection.
 
-    Returns:
-        DHIS2: An instance of the DHIS2 client connected to the specified DHIS2 instance.
+    Parameters
+    ----------
+    dhis2_connection : DHIS2Connection
+        The connection to the DHIS2 instance.
+
+    Returns
+    -------
+    DHIS2
+        An instance of the DHIS2 client connected to the specified DHIS2 instance.
     """
     try:
         dhis2_client = DHIS2(dhis2_connection, cache_dir=Path(workspace.files_path) / ".cache")
@@ -87,24 +85,41 @@ def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
         raise Exception(f"Error while connecting to {dhis2_connection.url} error: {e}") from e
 
 
-@dhis2_shapes_extract.task
-def extract_shapes(
-    dhis2_client: DHIS2, org_level: int, geometry_column: str = "geometry"
-) -> gpd.GeoDataFrame:
-    """Retrieves organizational unit shapes from a DHIS2 instance.
+def retrieve_shapes(
+    dhis2_connection: DHIS2Connection,
+    org_level: int,
+    output_path: Path,
+    geometry_column: str = "geometry",
+) -> None:
+    """Retrieve and save shapes from a DHIS2 instance for a specified organizational level.
 
-    Returns:
-        gpd.GeoDataFrame: A GeoDataFrame containing organizational unit shapes.
+    Parameters
+    ----------
+    dhis2_connection : DHIS2Connection
+        The connection to the DHIS2 instance.
+    org_level : int
+        The organizational unit level to retrieve shapes for.
+    output_path : Path
+        The directory where the shapes will be saved.
+    geometry_column : str, optional
+        The name of the column containing geometry data, by default "geometry".
+
+    Raises
+    ------
+    Exception
+        If an error occurs during the extraction or saving of shapes.
     """
     try:
+        dhis2_client = get_dhis2_client(dhis2_connection)
         df_pyramid = get_organisation_units(dhis2_client, max_level=org_level)
         df_pyramid = df_pyramid.filter(pl.col("level") == org_level).drop(
             ["id", "name", "level", "opening_date", "closed_date"]
         )
-        current_run.log_info(f"{df_pyramid.shape[0]} Shapes extracted for org level {org_level}")
 
         if len(df_pyramid) == 0:
             raise ValueError("No shapes found for the specified org level")
+
+        current_run.log_info(f"{df_pyramid.shape[0]} Shapes extracted for org level {org_level}")
 
         # Convert GeoJSON strings to Shapely geometries
         def geojson_to_shapely(geojson_str: any) -> BaseGeometry:
@@ -119,19 +134,42 @@ def extract_shapes(
         )
 
         # Convert to GeoPandas DataFrame
-        return gpd.GeoDataFrame(
+        shapes = gpd.GeoDataFrame(
             df_pyramid.drop(geometry_column).to_pandas(),
             geometry=shapely_geoms,
             crs="EPSG:4326",  # NOTE: Assuming WGS84 coordinate system
         )
 
+        save_shapes(
+            shapes=shapes,
+            output_path=output_path,
+            filename=f"shapes_level{org_level}_{datetime.now().strftime('%Y_%m_%d_%H%M')}.gpkg",
+        )
     except Exception as e:
         raise Exception(f"Error while extracting shapes: {e}") from e
 
 
-@dhis2_shapes_extract.task
 def save_shapes(shapes: gpd.GeoDataFrame, output_path: Path, filename: str) -> None:
-    """Saves the shapes to the specified output path."""
+    """Save a GeoDataFrame to a file in the specified output path.
+
+    Parameters
+    ----------
+    shapes : gpd.GeoDataFrame
+        The GeoDataFrame containing the shapes to save.
+    output_path : Path
+        The directory where the file will be saved.
+    filename : str
+        The name of the file to save the shapes in.
+
+    Raises
+    ------
+    PermissionError
+        If there is no permission to access the file.
+    OSError
+        If an I/O error occurs during saving.
+    Exception
+        For any other unexpected errors.
+    """
     try:
         output_path.mkdir(parents=True, exist_ok=True)
     except Exception as e:
