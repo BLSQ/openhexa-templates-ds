@@ -105,27 +105,31 @@ def dhis2_extract_data_elements(
 
     current_run.log_info("Checking data request")
 
+    if not end_date:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        current_run.log_info(f"End date not provided, using {end_date}")
+
     where = organisation_units or organisation_unit_groups
     if not where:
         msg = "No organisation units or organisation unit groups provided"
         current_run.log_error(msg)
         raise ValueError(msg)
 
-    if data_elements is not None:
+    if data_elements:
         data_elements = filter_objects(
             objects_in_request=data_elements,
             objects_in_dhis2=src_data_elements["id"].to_list(),
             object_type="Data element",
         )
 
-    if organisation_units is not None:
+    if organisation_units:
         organisation_units = filter_objects(
             objects_in_request=organisation_units,
             objects_in_dhis2=src_organisation_units["id"].to_list(),
             object_type="Organisation unit",
         )
 
-    if organisation_unit_groups is not None:
+    if organisation_unit_groups:
         organisation_unit_groups = filter_objects(
             objects_in_request=organisation_unit_groups,
             objects_in_dhis2=src_organisation_unit_groups["id"].to_list(),
@@ -136,11 +140,11 @@ def dhis2_extract_data_elements(
     data_values = extract_data_elements(
         dhis2=dhis2,
         data_elements=data_elements,
-        organisation_units=organisation_units,
-        organisation_unit_groups=organisation_unit_groups,
+        org_units=organisation_units if organisation_units else None,
+        org_unit_groups=organisation_unit_groups if organisation_unit_groups else None,
         include_children=include_children,
-        start_date=start_date,
-        end_date=end_date,
+        start_date=datetime.fromisoformat(start_date),
+        end_date=datetime.fromisoformat(end_date),
     )
     current_run.log_info(f"Extracted {len(data_values)} data values")
 
@@ -149,7 +153,6 @@ def dhis2_extract_data_elements(
         df=data_values,
         data_elements=src_data_elements,
         organisation_units=src_organisation_units,
-        organisation_unit_groups=src_organisation_unit_groups,
         category_option_combos=src_category_option_combos,
     )
     current_run.log_info("Sucessfully joined object names to output data")
