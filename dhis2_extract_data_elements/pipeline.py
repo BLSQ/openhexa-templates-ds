@@ -95,7 +95,6 @@ def dhis2_extract_data_elements(
     dhis2 = DHIS2(connection=src_dhis2, cache_dir=cache_dir)
 
     check_server_health(dhis2)
-    check_authentication(dhis2)
 
     current_run.log_info("Reading metadata from source DHIS2 instance")
     src_data_elements = get_data_elements(dhis2)
