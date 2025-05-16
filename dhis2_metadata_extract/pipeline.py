@@ -136,7 +136,7 @@ def dhis2_metadata_extract(
         retrieve_datasets(dhis2_client, output_path, get_datasets)
         retrieve_data_elements(dhis2_client, output_path, get_data_elements)
         retrieve_data_element_groups(dhis2_client, output_path, get_data_element_groups)
-        retrieve_categorty_options_combos(dhis2_client, output_path, get_category_options)
+        retrieve_category_option_combos(dhis2_client, output_path, get_category_options)
         current_run.log_info("Pipeline finished.")
     except Exception as e:
         current_run.log_error(f"An error ocurred during the execution: {e}")
@@ -329,7 +329,7 @@ def retrieve_data_element_groups(dhis2_client: DHIS2, output_path: Path, run: bo
         current_run.log_info(f"Data element groups saved under: {output_path / filename}")
 
 
-def retrieve_categorty_options_combos(
+def retrieve_category_option_combos(
     dhis2_client: DHIS2, output_path: Path, run: bool = True
 ) -> None:
     """Retrieve and save category option combos from the DHIS2 instance.
@@ -352,11 +352,11 @@ def retrieve_categorty_options_combos(
         current_run.log_info("Retrieving category option combos")
         try:
             categorty_options = get_category_option_combos(dhis2_client)
-            filename = f"categorty_options_combos_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
+            filename = f"categorty_option_combos_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=categorty_options, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving categorty option combos: {e}") from e
-        current_run.log_info(f"Categorty options combos saved under: {output_path / filename}")
+        current_run.log_info(f"Category option combos saved under: {output_path / filename}")
 
 
 def save_file(df: pl.DataFrame, output_path: Path, filename: str) -> None:
