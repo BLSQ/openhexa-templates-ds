@@ -1,0 +1,3 @@
+XlsxWriter
+psycopg2-binary
+openhexa.toolbox @ git+https://github.com/BLSQ/openhexa-toolbox@main
