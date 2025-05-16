@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import polars as pl
 import requests
 from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.sdk.pipelines import parameter, pipeline
@@ -129,6 +130,13 @@ from openhexa.toolbox.dhis2.periods import period_from_string
     help="Output OpenHEXA dataset. A new version will be created if new content is detected.",
     required=False,
 )
+@parameter(
+    code="dst_table",
+    type=str,
+    name="Output DB table",
+    help="Output DB table name. If not provided, output will not be saved to a DB table.",
+    required=False,
+)
 def dhis2_extract_data_elements(
     src_dhis2: DHIS2Connection,
     start_period: str,
@@ -142,6 +150,7 @@ def dhis2_extract_data_elements(
     end_period: str | None = None,
     dst_file: str | None = None,
     dst_dataset: Dataset | None = None,
+    dst_table: str | None = None,
 ):
     """Extract data elements from a DHIS2 instance and save them to a parquet file."""
     cache_dir = Path(workspace.files_path) / ".cache"
@@ -224,6 +233,9 @@ def dhis2_extract_data_elements(
 
     if dst_dataset:
         write_to_dataset(fp=dst_file, dataset=dst_dataset)
+
+    if dst_table:
+        write_to_db(df=data_values, table_name=dst_table)
 
 
 def default_output_path() -> Path:
@@ -384,3 +396,21 @@ def in_dataset_version(file: Path, dataset_version: DatasetVersion) -> bool:
         if md5_file == md5_url:
             return True
     return False
+
+
+def write_to_db(df: pl.DataFrame, table_name: str) -> None:
+    """Write the dataframe to a DB table.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The dataframe to write.
+    table_name : str
+        The name of the table to write to.
+    """
+    df.write_database(
+        table_name=table_name,
+        connection=workspace.database_url,
+        if_table_exists="replace",
+    )
+    current_run.log_info(f"Data written to DB table {table_name}")
