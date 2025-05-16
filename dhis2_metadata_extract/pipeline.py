@@ -352,7 +352,7 @@ def retrieve_category_option_combos(
         current_run.log_info("Retrieving category option combos")
         try:
             categorty_options = get_category_option_combos(dhis2_client)
-            filename = f"categorty_option_combos_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
+            filename = f"category_option_combos_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=categorty_options, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving categorty option combos: {e}") from e
