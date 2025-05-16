@@ -1,9 +1,16 @@
+import base64
+import hashlib
 import re
 from datetime import datetime
 from pathlib import Path
 
-from openhexa.sdk import DHIS2Connection, current_run, parameter, pipeline, workspace
+import requests
+from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
+from openhexa.sdk.pipelines import parameter, pipeline
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
+from openhexa.sdk.pipelines.run import current_run
+from openhexa.sdk.workspaces import workspace
+from openhexa.sdk.workspaces.connection import DHIS2Connection
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.api import DHIS2ApiError
 from openhexa.toolbox.dhis2.dataframe import (
@@ -115,6 +122,13 @@ from openhexa.toolbox.dhis2.periods import period_from_string
     help="Output file path in the workspace. Parent directory will automatically be created.",
     required=False,
 )
+@parameter(
+    code="dst_dataset",
+    type=Dataset,
+    name="Output dataset",
+    help="Output OpenHEXA dataset. A new version will be created if new content is detected.",
+    required=False,
+)
 def dhis2_extract_data_elements(
     src_dhis2: DHIS2Connection,
     start_period: str,
@@ -127,6 +141,7 @@ def dhis2_extract_data_elements(
     org_unit_levels: list[str] | None = None,
     end_period: str | None = None,
     dst_file: str | None = None,
+    dst_dataset: Dataset | None = None,
 ):
     """Extract data elements from a DHIS2 instance and save them to a parquet file."""
     cache_dir = Path(workspace.files_path) / ".cache"
@@ -207,6 +222,9 @@ def dhis2_extract_data_elements(
     current_run.add_file_output(dst_file.as_posix())
     current_run.log_info(f"Data written to {dst_file}")
 
+    if dst_dataset:
+        write_to_dataset(fp=dst_file, dataset=dst_dataset)
+
 
 def default_output_path() -> Path:
     """Get default output path for pipeline outputs.
@@ -267,3 +285,102 @@ def last_analytics_update(dhis2: DHIS2) -> datetime | None:
     """
     dtime_str = dhis2.meta.system_info.get("lastAnalyticsTableSuccess")
     return datetime.fromisoformat(dtime_str) if dtime_str else None
+
+
+def write_to_dataset(fp: Path, dataset: Dataset):
+    """Add file to an OpenHEXA dataset.
+
+    Parameters
+    ----------
+    fp : Path
+        The path to the file to write.
+    dataset : Dataset
+        The dataset to write to.
+    """
+    if dataset.latest_version is not None:
+        if in_dataset_version(file=fp, dataset_version=dataset.latest_version):
+            current_run.log_info("File is already in the dataset and no changes have been detected")
+            return
+
+    # increment dataset version name and create the new dataset version
+    if dataset.latest_version is not None:
+        version_number = int(dataset.latest_version.name.split("v")[-1])
+        version_number += 1
+    else:
+        version_number = 1
+    dataset_version = dataset.create_version(name=f"v{version_number}")
+
+    dataset_version.add_file(fp, "data_values.parquet")
+    current_run.log_info(f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}")
+
+
+def md5_from_url(url: str) -> str:
+    """Get the MD5 hash of a file from a URL.
+
+    Assumes the file is hosted on Google Cloud Storage and uses the x-goog-hash header.
+
+    Parameters
+    ----------
+    url : str
+        The URL of the file.
+
+    Returns
+    -------
+    str
+        The MD5 hash of the file, base64 encoded.
+
+    Raises
+    ------
+    ValueError
+        If the x-goog-hash header is not found in the response.
+    """
+    r = requests.head(url)
+    r.raise_for_status()
+    x_goog_hash = r.headers.get("x-goog-hash")
+    if x_goog_hash is None:
+        raise ValueError("x-goog-hash header not found in response")
+    return x_goog_hash.split("md5=")[-1]
+
+
+def md5_from_file(fp: Path) -> str:
+    """Get the MD5 hash of a file.
+
+    Parameters
+    ----------
+    fp : Path
+        The path to the file.
+
+    Returns
+    -------
+    str
+        The MD5 hash of the file, base64 encoded.
+    """
+    with fp.open("rb") as f:
+        file_hash = hashlib.md5()
+        for chunk in f.read(8192):
+            while chunk:
+                file_hash.update(chunk)
+    return base64.b64encode(file_hash.digest()).decode("utf-8")
+
+
+def in_dataset_version(file: Path, dataset_version: DatasetVersion) -> bool:
+    """Check if a file is in the dataset version.
+
+    Parameters
+    ----------
+    file : Path
+        The path to the file.
+    dataset_version : DatasetVersion
+        The dataset version to check against.
+
+    Returns
+    -------
+    bool
+        True if the file is in the dataset version, False otherwise.
+    """
+    md5_file = md5_from_file(file)
+    for f in dataset_version.files:
+        md5_url = md5_from_url(f.download_url)
+        if md5_file == md5_url:
+            return True
+    return False
