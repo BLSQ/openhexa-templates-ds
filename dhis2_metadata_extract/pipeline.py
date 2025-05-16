@@ -12,12 +12,12 @@ from openhexa.sdk import (
 )
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import (
-    get_organisation_units,
-    get_organisation_unit_groups,
-    get_datasets,
-    get_data_elements,
-    get_data_element_groups,
     get_category_option_combos,
+    get_data_element_groups,
+    get_data_elements,
+    get_datasets,
+    get_organisation_unit_groups,
+    get_organisation_units,
 )
 
 
@@ -27,7 +27,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     name="DHIS2 instance",
     type=DHIS2Connection,
     help="Credentials for the DHIS2 instance connection",
-    required=False,  # True # -------------------------------------> REMOVE
+    required=True,
 )
 @parameter(
     "get_org_units",
@@ -221,6 +221,9 @@ def retrieve_org_unit_groups(
         current_run.log_info("Retrieving organisation unit groups")
         try:
             org_unit_groups = get_organisation_unit_groups(dhis2_client)
+            org_unit_groups = org_unit_groups.with_columns(
+                [pl.col("organisation_units").list.join(",").alias("organisation_units")]
+            )
             filename = f"org_units_groups_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=org_unit_groups, output_path=output_path, filename=filename)
         except Exception as e:
@@ -253,6 +256,13 @@ def retrieve_datasets(
         current_run.log_info("Retrieving datasets")
         try:
             datasets = get_datasets(dhis2_client)
+            datasets = datasets.with_columns(
+                [
+                    pl.col("organisation_units").list.join(",").alias("organisation_units"),
+                    pl.col("data_elements").list.join(",").alias("data_elements"),
+                    pl.col("indicators").list.join(",").alias("indicators"),
+                ]
+            )
             filename = f"datasets_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=datasets, output_path=output_path, filename=filename)
         except Exception as e:
@@ -309,6 +319,9 @@ def retrieve_data_element_groups(dhis2_client: DHIS2, output_path: Path, run: bo
         current_run.log_info("Retrieving data element groups")
         try:
             data_element_groups = get_data_element_groups(dhis2_client)
+            data_element_groups = data_element_groups.with_columns(
+                [pl.col("data_elements").list.join(",").alias("data_elements")]
+            )
             filename = f"data_element_groups_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=data_element_groups, output_path=output_path, filename=filename)
         except Exception as e:
@@ -375,7 +388,6 @@ def save_file(df: pl.DataFrame, output_path: Path, filename: str) -> None:
     try:
         output_fname = output_path / filename
         df.write_csv(output_fname)
-        current_run.log_info(f"File successfully saved to {output_fname}")
     except PermissionError as e:
         raise PermissionError("Error: You don't have permission to access this file.") from e
     except OSError as e:
