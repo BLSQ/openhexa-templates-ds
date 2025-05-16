@@ -132,7 +132,15 @@ def dhis2_extract_data_elements(
     cache_dir = Path(workspace.files_path) / ".cache"
     dhis2 = DHIS2(connection=src_dhis2, cache_dir=cache_dir)
 
+    # raise an error if the instance is not reachable
     check_server_health(dhis2)
+
+    # log last update of analytics tables
+    last_update = last_analytics_update(dhis2)
+    if last_update:
+        current_run.log_info(
+            f"Last update of analytics tables: {last_update.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
 
     current_run.log_info("Reading metadata from source DHIS2 instance")
     src_data_elements = get_data_elements(dhis2)
@@ -241,3 +249,21 @@ def check_server_health(dhis2: DHIS2):
     except ConnectionError:
         current_run.log_error(f"Unable to reach DHIS2 instance at url {dhis2.api.url}")
         raise
+
+
+def last_analytics_update(dhis2: DHIS2) -> datetime | None:
+    """Get the last update date of the analytics tables.
+
+    Parameters
+    ----------
+    dhis2 : DHIS2
+        The DHIS2 instance to check.
+
+    Returns
+    -------
+    datetime | None
+        The last update date of the analytics tables. Returns None if the analytics tables have
+        never been updated.
+    """
+    dtime_str = dhis2.meta.system_info.get("lastAnalyticsTableSuccess")
+    return datetime.fromisoformat(dtime_str) if dtime_str else None
