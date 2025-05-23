@@ -7,8 +7,8 @@ from pathlib import Path
 import polars as pl
 import requests
 from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
-from openhexa.sdk.pipelines import parameter, pipeline
-from openhexa.sdk.pipelines.parameter import DHIS2Widget
+from openhexa.sdk.pipelines.parameter import DHIS2Widget, parameter
+from openhexa.sdk.pipelines.pipeline import pipeline
 from openhexa.sdk.pipelines.run import current_run
 from openhexa.sdk.workspaces import workspace
 from openhexa.sdk.workspaces.connection import DHIS2Connection
@@ -295,7 +295,7 @@ def last_analytics_update(dhis2: DHIS2) -> datetime | None:
         The last update date of the analytics tables. Returns None if the analytics tables have
         never been updated.
     """
-    dtime_str = dhis2.meta.system_info.get("lastAnalyticsTableSuccess")
+    dtime_str = dhis2.meta.system_info().get("lastAnalyticsTableSuccess")
     return datetime.fromisoformat(dtime_str) if dtime_str else None
 
 
