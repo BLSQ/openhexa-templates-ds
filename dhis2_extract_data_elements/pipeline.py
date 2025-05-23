@@ -1,13 +1,20 @@
+import base64
+import hashlib
 import re
 from datetime import datetime
 from pathlib import Path
 
+import polars as pl
+import requests
 from openhexa.sdk import DHIS2Connection, current_run, parameter, pipeline, workspace
+from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import (
+    extract_data_element_group,
     extract_data_elements,
     get_category_option_combos,
+    get_data_element_groups,
     get_data_elements,
     get_organisation_unit_groups,
     get_organisation_units,
@@ -33,6 +40,16 @@ from openhexa.toolbox.dhis2.dataframe import (
     connection="src_dhis2",
 )
 @parameter(
+    code="data_element_groups",
+    type=str,
+    multiple=True,
+    name="Data element groups",
+    help="Data element groups to extract",
+    required=False,
+    widget=DHIS2Widget.DATA_ELEMENT_GROUPS,
+    connection="src_dhis2",
+)
+@parameter(
     code="organisation_units",
     type=str,
     multiple=True,
@@ -43,11 +60,11 @@ from openhexa.toolbox.dhis2.dataframe import (
     connection="src_dhis2",
 )
 @parameter(
-    code="organisation_unit_groups",
+    code="organisation_unit_group",
     type=str,
-    multiple=True,
-    name="Organisation unit groups",
-    help="IDs of organisation unit groups to extract data elements from",
+    multiple=False,
+    name="Organisation unit group",
+    help="ID of organisation unit group to extract data elements from",
     required=False,
     widget=DHIS2Widget.ORG_UNIT_GROUPS,
     connection="src_dhis2",
@@ -80,15 +97,32 @@ from openhexa.toolbox.dhis2.dataframe import (
     help="Output file path in the workspace. Parent directory will automatically be created.",
     required=False,
 )
+@parameter(
+    code="dst_dataset",
+    type=Dataset,
+    name="Output dataset",
+    help="Output OpenHEXA dataset. A new version will be created if new content is detected.",
+    required=False,
+)
+@parameter(
+    code="dst_table",
+    type=str,
+    name="Output DB table",
+    help="Output DB table name. If not provided, output will not be saved to a DB table.",
+    required=False,
+)
 def dhis2_extract_data_elements(
     src_dhis2: DHIS2Connection,
-    data_elements: list[str],
     start_date: str,
+    data_elements: list[str] | None = None,
+    data_element_group: list[str] | None = None,
     organisation_units: list[str] | None = None,
     organisation_unit_groups: list[str] | None = None,
     include_children: bool = False,
     end_date: str | None = None,
     dst_file: str | None = None,
+    dst_dataset: Dataset | None = None,
+    dst_table: str | None = None,
 ):
     """Extract data elements from a DHIS2 instance and save them to a parquet file."""
     cache_dir = Path(workspace.files_path) / ".cache"
@@ -137,15 +171,34 @@ def dhis2_extract_data_elements(
         )
 
     current_run.log_info("Starting data extraction")
-    data_values = extract_data_elements(
-        dhis2=dhis2,
-        data_elements=data_elements,
-        org_units=organisation_units if organisation_units else None,
-        org_unit_groups=organisation_unit_groups if organisation_unit_groups else None,
-        include_children=include_children,
-        start_date=datetime.fromisoformat(start_date),
-        end_date=datetime.fromisoformat(end_date),
-    )
+
+    if data_elements:
+        data_values = extract_data_elements(
+            dhis2=dhis2,
+            data_elements=data_elements,
+            org_units=organisation_units if organisation_units else None,
+            org_unit_groups=organisation_unit_groups if organisation_unit_groups else None,
+            include_children=include_children,
+            start_date=datetime.fromisoformat(start_date),
+            end_date=datetime.fromisoformat(end_date),
+        )
+
+    elif data_element_group:
+        data_values = extract_data_element_group(
+            dhis2=dhis2,
+            data_element_group=data_element_group,
+            org_units=organisation_units if organisation_units else None,
+            org_unit_groups=organisation_unit_groups if organisation_unit_groups else None,
+            include_children=include_children,
+            start_date=datetime.fromisoformat(start_date),
+            end_date=datetime.fromisoformat(end_date),
+        )
+
+    else:
+        msg = "No data elements or data element groups provided"
+        current_run.log_error(msg)
+        raise ValueError(msg)
+
     current_run.log_info(f"Extracted {len(data_values)} data values")
 
     current_run.log_info("Joining object names to output data")
@@ -167,6 +220,12 @@ def dhis2_extract_data_elements(
     data_values.write_parquet(dst_file)
     current_run.add_file_output(dst_file.as_posix())
     current_run.log_info(f"Data written to {dst_file}")
+
+    if dst_dataset:
+        write_to_dataset(fp=dst_file, dataset=dst_dataset)
+
+    if dst_table:
+        write_to_db(df=data_values, table_name=dst_table)
 
 
 def default_output_path() -> Path:
@@ -212,18 +271,6 @@ def check_server_health(dhis2: DHIS2):
         raise
 
 
-def check_authentication(dhis2: DHIS2):
-    """Check if authentication was successful."""
-    r = dhis2.me()
-    if r.status_code != 200:
-        msg = f"Unable to authenticate to DHIS2 instance at url: {dhis2.api.url}"
-        current_run.log_error(msg)
-        raise ConnectionError(msg)
-
-    msg = f"Connected to DHIS2 instance at url {dhis2.api.url} with username '{r['username']}'"
-    current_run.log_info(msg)
-
-
 def filter_objects(
     objects_in_request: list[str], objects_in_dhis2: list[str], object_type: str
 ) -> list[str]:
@@ -253,3 +300,119 @@ def filter_objects(
             filtered_objects.append(obj)
 
     return filtered_objects
+
+
+def write_to_dataset(fp: Path, dataset: Dataset):
+    """Add file to an OpenHEXA dataset.
+
+    Parameters
+    ----------
+    fp : Path
+        The path to the file to write.
+    dataset : Dataset
+        The dataset to write to.
+    """
+    if dataset.latest_version is not None:
+        if in_dataset_version(file=fp, dataset_version=dataset.latest_version):
+            current_run.log_info("File is already in the dataset and no changes have been detected")
+            return
+
+    # increment dataset version name and create the new dataset version
+    if dataset.latest_version is not None:
+        version_number = int(dataset.latest_version.name.split("v")[-1])
+        version_number += 1
+    else:
+        version_number = 1
+    dataset_version = dataset.create_version(name=f"v{version_number}")
+
+    dataset_version.add_file(fp, "data_values.parquet")
+    current_run.log_info(f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}")
+
+
+def md5_from_url(url: str) -> str:
+    """Get the MD5 hash of a file from a URL.
+
+    Assumes the file is hosted on Google Cloud Storage and uses the x-goog-hash header.
+
+    Parameters
+    ----------
+    url : str
+        The URL of the file.
+
+    Returns
+    -------
+    str
+        The MD5 hash of the file, base64 encoded.
+
+    Raises
+    ------
+    ValueError
+        If the x-goog-hash header is not found in the response.
+    """
+    r = requests.head(url)
+    r.raise_for_status()
+    x_goog_hash = r.headers.get("x-goog-hash")
+    if x_goog_hash is None:
+        raise ValueError("x-goog-hash header not found in response")
+    return x_goog_hash.split("md5=")[-1]
+
+
+def md5_from_file(fp: Path) -> str:
+    """Get the MD5 hash of a file.
+
+    Parameters
+    ----------
+    fp : Path
+        The path to the file.
+
+    Returns
+    -------
+    str
+        The MD5 hash of the file, base64 encoded.
+    """
+    with fp.open("rb") as f:
+        file_hash = hashlib.md5()
+        while chunk := f.read(8192):
+            file_hash.update(chunk)
+    return base64.b64encode(file_hash.digest()).decode("utf-8")
+
+
+def in_dataset_version(file: Path, dataset_version: DatasetVersion) -> bool:
+    """Check if a file is in the dataset version.
+
+    Parameters
+    ----------
+    file : Path
+        The path to the file.
+    dataset_version : DatasetVersion
+        The dataset version to check against.
+
+    Returns
+    -------
+    bool
+        True if the file is in the dataset version, False otherwise.
+    """
+    md5_file = md5_from_file(file)
+    for f in dataset_version.files:
+        md5_url = md5_from_url(f.download_url)
+        if md5_file == md5_url:
+            return True
+    return False
+
+
+def write_to_db(df: pl.DataFrame, table_name: str) -> None:
+    """Write the dataframe to a DB table.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The dataframe to write.
+    table_name : str
+        The name of the table to write to.
+    """
+    df.write_database(
+        table_name=table_name,
+        connection=workspace.database_url,
+        if_table_exists="replace",
+    )
+    current_run.log_info(f"Data written to DB table {table_name}")
