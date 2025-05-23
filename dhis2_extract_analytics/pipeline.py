@@ -369,9 +369,8 @@ def md5_from_file(fp: Path) -> str:
     """
     with fp.open("rb") as f:
         file_hash = hashlib.md5()
-        for chunk in f.read(8192):
-            while chunk:
-                file_hash.update(chunk)
+        while chunk := f.read(8192):
+            file_hash.update(chunk)
     return base64.b64encode(file_hash.digest()).decode("utf-8")
 
 
