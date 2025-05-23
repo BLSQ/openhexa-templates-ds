@@ -2,7 +2,6 @@ from datetime import datetime
 from pathlib import Path
 
 import polars as pl
-
 from openhexa.sdk import DHIS2Connection, current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import (
