@@ -59,11 +59,11 @@ from openhexa.toolbox.dhis2.dataframe import (
     connection="src_dhis2",
 )
 @parameter(
-    code="organisation_unit_group",
+    code="organisation_unit_groups",
     type=str,
-    multiple=False,
-    name="Organisation unit group",
-    help="ID of organisation unit group to extract data elements from",
+    multiple=True,
+    name="Organisation unit groups",
+    help="ID of organisation unit groups to extract data elements from",
     required=False,
     widget=DHIS2Widget.ORG_UNIT_GROUPS,
     connection="src_dhis2",
