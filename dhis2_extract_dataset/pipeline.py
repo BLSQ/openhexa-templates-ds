@@ -1,6 +1,5 @@
-"""Template for newly generated pipelines."""
-
 import os
+import re
 import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -29,7 +28,7 @@ from sqlalchemy import create_engine
     "dhis_con",
     name="DHIS2 Connection",
     type=DHIS2Connection,
-    default="dhis2-demo-2-41",
+    default="dhis2-demo-2-39",
     required=True,
 )
 @parameter(
@@ -40,7 +39,7 @@ from sqlalchemy import create_engine
     connection="dhis_con",
     required=True,
     # default=None,
-    default="Nyh6laLdBEJ",
+    default="j38YW1Am7he",
 )
 @parameter(
     "start",
@@ -86,7 +85,7 @@ from sqlalchemy import create_engine
     type=str,
     multiple=True,
     required=False,
-    default=["GGghZsfu7qV"],
+    default=["RXL3lPSK8oG"],
 )
 def dhis2_extract_dataset(
     dhis_con: DHIS2Connection,
@@ -108,7 +107,7 @@ def dhis2_extract_dataset(
     start = valid_date(start)
     end = valid_date(end)
     dhis2_name = get_dhis2_name_domain(dhis_con)
-    ds = get_datasets_as_dict(dhis, dhis2_name)
+    ds = get_datasets_as_dict(dhis)
     check_parameters_validation(ou_ids, ou_group_ids)
     dhis2_name = create_extraction_folder(dhis2_name, ds, dataset_id)
     table = extract_raw_data(
@@ -412,7 +411,10 @@ def extract_raw_data(
     data_values = data_values.with_columns(
         [
             pl.Series(
-                "period_type_extracted", data_values["period"].map_elements(period_to_period_type)
+                "period_type_extracted",
+                data_values["period"].map_elements(
+                    lambda x: str(type(period_from_string(x)).__name__).replace("Week", "Weekly")
+                ),
             )
         ]
     )
@@ -443,16 +445,45 @@ def is_iso_date(date_str: str) -> bool:
 
 
 def align_to_week_start(date: datetime, anchor_day: int) -> datetime:
-    """Aligns a date to the start of the week based on DHIS2 anchor day."""
+    """Aligns a date to the start of the week based on DHIS2 anchor day.
+
+    Returns:
+        datetime: The aligned date corresponding to the start of the week.
+    """
     weekday = date.weekday()
     days_offset = (weekday - anchor_day) % 7
     return date - timedelta(days=days_offset)
 
 
 def isodate_to_period_type(date: str, period_type: str) -> Period:
+    """Converts an ISO date string to a DHIS2-compatible period string based on the specified period type.
+
+    Args:
+        date (str): The ISO date string in the format "YYYY-MM-DD".
+        period_type (str): The DHIS2 period type. Supported values include:
+            - "Daily": Converts to a daily period (e.g., "20230101").
+            - "Weekly": Converts to a weekly period starting on Monday (e.g., "2023W1").
+            - "WeeklyMonday", "WeeklyTuesday", ..., "WeeklySunday": Converts to a weekly period
+              aligned to the specified weekday.
+            - "Monthly": Converts to a monthly period (e.g., "202301").
+            - "BiMonthly": Converts to a bi-monthly period (e.g., "202301" for Jan-Feb).
+            - "Quarterly": Converts to a quarterly period (e.g., "2023Q1").
+            - "SixMonthly": Converts to a six-monthly period (e.g., "2023S1" for Jan-Jun).
+            - "SixMonthlyApril": Converts to a six-monthly period starting in April (e.g., "2023AprilS1").
+            - "Yearly": Converts to a yearly period (e.g., "2023").
+            - "FinancialApril": Converts to a financial year starting in April (e.g., "2023April").
+            - "FinancialJuly": Converts to a financial year starting in July (e.g., "2023July").
+            - "FinancialOct": Converts to a financial year starting in October (e.g., "2023Oct").
+
+    Returns:
+        Period: A DHIS2-compatible period object created from the generated period string.
+
+    Raises:
+        ValueError: If the provided period type is unsupported.
+    """  # noqa: E501
     """Converts an ISO date to a DHIS2-compatible period string with support for weekly anchors."""
     # Maps DHIS2 weekly period type to its anchor weekday (0 = Monday, 6 = Sunday)
-    WEEKLY_ANCHORS = {
+    weekly_anchors = {
         "Weekly": 0,
         "WeeklyMonday": 0,
         "WeeklyTuesday": 1,
@@ -462,16 +493,21 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
         "WeeklySaturday": 5,
         "WeeklySunday": 6,
     }
+
     dt = datetime.strptime(date, "%Y-%m-%d")
 
     if period_type == "Daily":
         period_str = dt.strftime("%Y%m%d")
 
     elif period_type.startswith("Weekly"):
-        anchor_day = WEEKLY_ANCHORS.get(period_type, 0)  # Default to Monday
+        anchor_day = weekly_anchors.get(period_type, 0)  # Default to Monday
         aligned_date = align_to_week_start(dt, anchor_day)
         iso_year, iso_week, _ = aligned_date.isocalendar()
-        period_str = f"{iso_year}W{iso_week}"  # No leading zero
+        if period_type != "Weekly" and period_type != "WeeklyMonday":
+            # If the period type specifies a weekday, append it
+            period_str = f"{iso_year}{period_type.replace('Weekly', '')[:3]}W{iso_week}"
+        else:
+            period_str = f"{iso_year}W{iso_week}"  # No leading zero
 
     elif period_type == "Monthly":
         period_str = dt.strftime("%Y%m")
@@ -513,62 +549,6 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
     return period_from_string(period_str)
 
 
-import re
-
-
-def period_to_period_type(period: str) -> str:
-    """
-    Detect the DHIS2 periodType from a DHIS2 period string, optionally specifying a weekly anchor.
-
-    Args:
-        period (str): A DHIS2 period string (e.g., '202401', '2023Q3', '2023W14', etc.)
-        anchor_day (str): Week start day for weekly periods. E.g., 'Wednesday', 'Sunday'
-
-    Returns:
-        str: The detected DHIS2 period type (e.g., 'WeeklyWednesday')
-
-    Raises:
-        ValueError: If the format is unrecognized.
-    """
-
-    if re.fullmatch(r"\d{8}", period):
-        return "Daily"
-
-    if re.fullmatch(r"\d{6}", period):
-        return "Monthly"
-
-    if re.fullmatch(r"\d{5}", period):  # e.g., '20240' for BiMonthly
-        return "BiMonthly"
-
-    if re.fullmatch(r"\d{4}Q[1-4]", period):
-        return "Quarterly"
-
-    if re.fullmatch(r"\d{4}S[1-2]", period):
-        return "SixMonthly"
-
-    if re.fullmatch(r"\d{4}AprilS[1-2]", period):
-        return "SixMonthlyApril"
-
-    if re.fullmatch(r"\d{4}", period):
-        return "Yearly"
-
-    if re.fullmatch(r"\d{4}April", period):
-        return "FinancialApril"
-
-    if re.fullmatch(r"\d{4}July", period):
-        return "FinancialJuly"
-
-    if re.fullmatch(r"\d{4}Oct", period):
-        return "FinancialOct"
-    match = re.fullmatch(r"(\d{4})([A-Za-z]{3})?W(\d{1,2})", period)
-    if match:
-        year, day, week = match.groups()
-        anchor = day if day else ""
-        return "Weekly" + anchor
-
-    raise ValueError(f"Unrecognized DHIS2 period format: {period}")
-
-
 def get_periods_with_no_data(
     retrieve_periods: list[str], start: str, end: str, dataset: dict
 ) -> list[str]:
@@ -588,21 +568,21 @@ def get_periods_with_no_data(
     start = isodate_to_period_type(start, period_type)
     end = isodate_to_period_type(end, period_type)
     if start != end:
-        excepted_periods = start.get_range(end)
+        expected_periods = start.range(end)
     else:
-        excepted_periods = [start]
-    # retrieve_periods = [period_from_string(p) for p in retrieve_periods]
-    missing_periods = [p for p in excepted_periods if p.period not in retrieve_periods]
-    unexpected_periods = [
-        p for p in retrieve_periods if p not in [ep.period for ep in excepted_periods]
-    ]
+        expected_periods = [start]
+    expected_periods = [str(p) for p in expected_periods]
+    retrieve_periods = [str(p) for p in retrieve_periods]
+    missing_periods = [p for p in expected_periods if p not in retrieve_periods]
+    unexpected_periods = [p for p in retrieve_periods if p not in expected_periods]
     if len(missing_periods) > 0:
         current_run.log_warning(
-            f"The following periods have no data: {sorted(missing_periods)} for dataset {dataset_name}"
+            f"Following periods have no data: {sorted(missing_periods)} for dataset {dataset_name}"
         )
     if len(unexpected_periods) > 0:
         current_run.log_warning(
-            f"The following periods are unexpected: {sorted(unexpected_periods)} for dataset {dataset_name}"
+            f"Following periods not expected: \
+                {sorted(unexpected_periods)} for dataset {dataset_name}"
         )
 
     return missing_periods
@@ -628,7 +608,7 @@ def get_dataelements_with_no_data(retrieve_dataelements: list[str], dataset: dic
     return missing_dataelements
 
 
-def get_datasets_as_dict(dhis: DHIS2, dhis2_name: str) -> dict[dict]:
+def get_datasets_as_dict(dhis: DHIS2) -> dict[dict]:
     """Get datasets metadata.
 
     Args:
@@ -638,7 +618,8 @@ def get_datasets_as_dict(dhis: DHIS2, dhis2_name: str) -> dict[dict]:
 
     Returns:
     -------
-    dict[dict] : dictionnary of dict Id, name, data elements, indicators and org units of all datasets.
+    dict[dict] : dictionnary of dict Id, name, data elements, indicators and org units of all
+    datasets.
     """
     datasets = {}
     for page in dhis.api.get_paged(
@@ -727,6 +708,57 @@ def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df["pe"] = df["pe"].map(lambda x: period_from_string(x).datetime)
     return df
+
+
+def period_to_period_type(period: str) -> str:
+    """Detect the DHIS2 periodType from a DHIS2 period string,optionally specifying a weekly anchor.
+
+    Args:
+        period (str): A DHIS2 period string (e.g., '202401', '2023Q3', '2023W14', etc.)
+        anchor_day (str): Week start day for weekly periods. E.g., 'Wednesday', 'Sunday'
+
+    Returns:
+        str: The detected DHIS2 period type (e.g., 'WeeklyWednesday')
+
+    Raises:
+        ValueError: If the format is unrecognized.
+    """
+    if re.fullmatch(r"\d{8}", period):
+        return "Daily"
+
+    if re.fullmatch(r"\d{6}", period):
+        return "Monthly"
+
+    if re.fullmatch(r"\d{5}", period):  # e.g., '20240' for BiMonthly
+        return "BiMonthly"
+
+    if re.fullmatch(r"\d{4}Q[1-4]", period):
+        return "Quarterly"
+
+    if re.fullmatch(r"\d{4}S[1-2]", period):
+        return "SixMonthly"
+
+    if re.fullmatch(r"\d{4}AprilS[1-2]", period):
+        return "SixMonthlyApril"
+
+    if re.fullmatch(r"\d{4}", period):
+        return "Yearly"
+
+    if re.fullmatch(r"\d{4}April", period):
+        return "FinancialApril"
+
+    if re.fullmatch(r"\d{4}July", period):
+        return "FinancialJuly"
+
+    if re.fullmatch(r"\d{4}Oct", period):
+        return "FinancialOct"
+    match = re.fullmatch(r"(\d{4})([A-Za-z]{3})?W(\d{1,2})", period)
+    if match:
+        _, day, _ = match.groups()
+        anchor = day if day else ""
+        return "Weekly" + anchor
+
+    raise ValueError(f"Unrecognized DHIS2 period format: {period}")
 
 
 if __name__ == "__main__":
