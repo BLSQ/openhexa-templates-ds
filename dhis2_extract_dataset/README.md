@@ -48,6 +48,18 @@ This pipeline automates the extraction of DHIS2 datasets by:
 
 ---
 
+## How to Use Orgunit Filters:
+
+Only one of the following combinations is allowed:
+- Use Orgunits with include children (True/false)
+- Use Group(s) of orgunits only
+If none of these orgunits filters is selected, data for all orgunits will be extracted.
+Mixing more than one of these options will raise an error.
+
+## Set dates
+Provide a start date (required). If not end date is provided: today is taken by default as end date
+
+
 ## 📂 Output Structure
 
 ```
@@ -84,27 +96,18 @@ workspace/
 
 ---
 
-## 🔐 Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `WORKSPACE_DATABASE_URL` | SQLAlchemy-compatible DB URL used for direct data injection |
-
----
-
 ## 📑 Example Use
 
-```python
-run = dhis2_extract_dataset(
-    dhis_con="dhis2-demo-2-41",
-    dataset_id="Nyh6laLdBEJ",
-    start="2024-01-01",
-    end="2024-03-31",
-    ou_group_ids=["GGghZsfu7qV"],
-    dataset=my_dataset,
-    extract_name="Q1-Extraction"
-)
-```
+Insert parameters: 
+![image](https://github.com/user-attachments/assets/39333d2a-5ee4-47ee-a7a1-85631f2b6bc4)
+
+See the output (missing data or unexpected data):
+![image](https://github.com/user-attachments/assets/198087c6-e32b-4585-8932-9768a6f189bd)
+
+Click to see the created dataset:
+![image](https://github.com/user-attachments/assets/957f9dbf-b7e3-4ed1-9879-f981b54115a7)
+
+
 
 ## 📝 Notes
 
