@@ -6,13 +6,17 @@ import geopandas as gpd
 import polars as pl
 from openhexa.sdk import (
     DHIS2Connection,
+    DHIS2Widget,
     current_run,
     parameter,
     pipeline,
     workspace,
 )
 from openhexa.toolbox.dhis2 import DHIS2
-from openhexa.toolbox.dhis2.dataframe import get_organisation_units
+from openhexa.toolbox.dhis2.dataframe import (
+    get_organisation_unit_levels,
+    get_organisation_units,
+)
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
 
@@ -26,12 +30,15 @@ from shapely.geometry.base import BaseGeometry
     required=True,
 )
 @parameter(
-    "org_level",
-    name="Organisational unit level",
-    type=int,
-    help="If not specified base level is retrieved",
+    code="org_unit_level",
+    type=str,
+    multiple=False,
+    name="Organisation unit level",
+    help="Organisation unit level to extract data elements from",
     required=False,
     default=None,
+    widget=DHIS2Widget.ORG_UNIT_LEVELS,
+    connection="dhis2_connection",
 )
 @parameter(
     "output_path",
@@ -42,7 +49,9 @@ from shapely.geometry.base import BaseGeometry
     default=None,
 )
 def dhis2_shapes_extract(
-    dhis2_connection: DHIS2Connection, org_level: int, output_path: str
+    dhis2_connection: DHIS2Connection,
+    org_unit_level: list[str] | None,
+    output_path: str | None = None,
 ) -> None:
     """Main pipeline function to extract shapes from a DHIS2 instance."""
     current_run.log_info("Shapes pipeline started")
@@ -53,12 +62,8 @@ def dhis2_shapes_extract(
     else:
         output_path = Path(output_path)
 
-    if org_level is None:
-        current_run.log_info("No org level specified, using base level 1")
-        org_level = 1
-
     try:
-        retrieve_shapes(dhis2_connection, org_level, output_path=output_path)
+        retrieve_shapes(dhis2_connection, org_unit_level, output_path=output_path)
 
     except Exception as e:
         current_run.log_error(f"Pipeline error: {e}")
@@ -87,7 +92,7 @@ def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
 
 def retrieve_shapes(
     dhis2_connection: DHIS2Connection,
-    org_level: int,
+    org_level_id: str,
     output_path: Path,
     geometry_column: str = "geometry",
 ) -> None:
@@ -97,8 +102,8 @@ def retrieve_shapes(
     ----------
     dhis2_connection : DHIS2Connection
         The connection to the DHIS2 instance.
-    org_level : int
-        The organizational unit level to retrieve shapes for.
+    org_level_id : str
+        The organizational unit level uid to retrieve shapes for.
     output_path : Path
         The directory where the shapes will be saved.
     geometry_column : str, optional
@@ -109,15 +114,22 @@ def retrieve_shapes(
     Exception
         If an error occurs during the extraction or saving of shapes.
     """
+    dhis2_client = get_dhis2_client(dhis2_connection)
+    if org_level_id is None:
+        current_run.log_warning("Organisation unit level not specified, using base level 2")
+        org_level = 2
+    else:
+        org_levels = get_organisation_unit_levels(dhis2_client)
+        org_level = org_levels.filter(pl.col("id") == org_level_id)["level"][0]
+
     try:
-        dhis2_client = get_dhis2_client(dhis2_connection)
         df_pyramid = get_organisation_units(dhis2_client, max_level=org_level)
         df_pyramid = df_pyramid.filter(pl.col("level") == org_level).drop(
             ["id", "name", "level", "opening_date", "closed_date"]
         )
 
         if len(df_pyramid) == 0:
-            raise ValueError("No shapes found for the specified org level")
+            raise ValueError("No shapes found for the specified organisation unit level")
 
         current_run.log_info(f"{df_pyramid.shape[0]} Shapes extracted for org level {org_level}")
 
@@ -140,11 +152,15 @@ def retrieve_shapes(
             crs="EPSG:4326",  # NOTE: Assuming WGS84 coordinate system
         )
 
+        fname = f"shapes_level{org_level}_{datetime.now().strftime('%Y_%m_%d_%H%M')}.gpkg"
+
         save_shapes(
             shapes=shapes,
             output_path=output_path,
-            filename=f"shapes_level{org_level}_{datetime.now().strftime('%Y_%m_%d_%H%M')}.gpkg",
+            filename=fname,
         )
+
+        current_run.add_file_output((output_path / fname).as_posix())
     except Exception as e:
         raise Exception(f"Error while extracting shapes: {e}") from e
 
