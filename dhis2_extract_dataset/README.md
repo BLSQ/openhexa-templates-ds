@@ -99,12 +99,15 @@ workspace/
 ## 📑 Example Use
 
 Insert parameters: 
+
 ![image](https://github.com/user-attachments/assets/39333d2a-5ee4-47ee-a7a1-85631f2b6bc4)
 
 See the output (missing data or unexpected data):
+
 ![image](https://github.com/user-attachments/assets/198087c6-e32b-4585-8932-9768a6f189bd)
 
 Click to see the created dataset:
+
 ![image](https://github.com/user-attachments/assets/957f9dbf-b7e3-4ed1-9879-f981b54115a7)
 
 
