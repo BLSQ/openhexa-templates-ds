@@ -11,10 +11,9 @@ from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import (
-    extract_data_element_group,
+    extract_data_element_groups,
     extract_data_elements,
     get_category_option_combos,
-    get_data_element_groups,
     get_data_elements,
     get_organisation_unit_groups,
     get_organisation_units,
@@ -115,7 +114,7 @@ def dhis2_extract_data_elements(
     src_dhis2: DHIS2Connection,
     start_date: str,
     data_elements: list[str] | None = None,
-    data_element_group: list[str] | None = None,
+    data_element_groups: list[str] | None = None,
     organisation_units: list[str] | None = None,
     organisation_unit_groups: list[str] | None = None,
     include_children: bool = False,
@@ -183,10 +182,10 @@ def dhis2_extract_data_elements(
             end_date=datetime.fromisoformat(end_date),
         )
 
-    elif data_element_group:
-        data_values = extract_data_element_group(
+    elif data_element_groups:
+        data_values = extract_data_element_groups(
             dhis2=dhis2,
-            data_element_group=data_element_group,
+            data_element_groups=data_element_groups,
             org_units=organisation_units if organisation_units else None,
             org_unit_groups=organisation_unit_groups if organisation_unit_groups else None,
             include_children=include_children,
