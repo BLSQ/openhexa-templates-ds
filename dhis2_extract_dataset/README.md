@@ -26,7 +26,7 @@ This pipeline automates the extraction of DHIS2 datasets by:
 | `ou_ids`             | list[str]       | Specific OrgUnit IDs |
 | `ou_group_ids`       | list[str]       | OrgUnit Group IDs |
 | `include_children`   | bool            | Include children of selected OrgUnits |
-| `dataset`            | Dataset         | Optional OpenHexa dataset to store the result |
+| `dataset`            | Dataset         | OpenHexa dataset to store the result |
 | `extract_name`       | str             | Optional label for dataset version |
 
 ---
