@@ -1,2 +1,2 @@
 openhexa-toolbox>=2.7
-psycopg2
+psycopg2-binary
