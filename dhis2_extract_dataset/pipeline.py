@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 import pandas as pd
 import polars as pl
+from dateutil import relativedelta
 from openhexa.sdk import Dataset, workspace
 from openhexa.sdk.pipelines import current_run, parameter, pipeline
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
@@ -20,7 +21,6 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 from openhexa.toolbox.dhis2.periods import Period, period_from_string
-from dateutil import relativedelta
 from sqlalchemy import create_engine
 
 
@@ -344,10 +344,19 @@ def valid_date(date_str: str | None) -> str:
     raise ValueError(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
 
 
-def get_all_descendant_org_units(dhis, org_unit_id):
+def get_all_descendant_org_units(dhis: DHIS2, org_unit_id: str) -> list[str]:
+    """Recursively retrieves all descendant organization unit IDs for a given organization unit.
+
+    Args:
+        dhis: The DHIS2 client object used to interact with the DHIS2 API.
+        org_unit_id: The ID of the parent organization unit.
+
+    Returns:
+        list[str]: A list of descendant organization unit IDs.
+    """
     descendants = []
 
-    def recurse(parent_id):
+    def recurse(parent_id: str):
         params = {"fields": "children[id]"}
         response = dhis.api.get(f"organisationUnits/{parent_id}.json", params=params)
         children = response.get("children", [])
@@ -361,15 +370,40 @@ def get_all_descendant_org_units(dhis, org_unit_id):
     return descendants
 
 
-def get_dataset_org_units(dhis, dataset_id):
+def get_dataset_org_units(dhis: DHIS2, dataset_id: str) -> list[str]:
+    """Retrieve the list of organization unit IDs associated with a given dataset.
+
+    Args:
+        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
+        dataset_id (str): The ID of the dataset.
+
+    Returns:
+        list[str]: A list of organization unit IDs linked to the specified dataset.
+    """
     params = {"fields": "organisationUnits[id]"}
     response = dhis.api.get(f"dataSets/{dataset_id}.json", params=params)
     return [ou["id"] for ou in response.get("organisationUnits", [])]
 
 
 def fetch_dataset_data_for_valid_descendants(
-    dhis, dataset_id, parent_org_unit_ids, start_date, end_date
-):
+    dhis: DHIS2, dataset_id: str, parent_org_unit_ids: list[str], start_date: str, end_date: str
+) -> pl.DataFrame:
+    """Fetch dataset data for valid descendant organization units.
+
+    This function retrieves all descendant organization units for the given parent organization unit
+    IDs, filters them to include only those linked to the specified dataset, and then extracts the
+    dataset data for the valid organization units within the specified date range.
+
+    Args:
+        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
+        dataset_id (str): The ID of the dataset.
+        parent_org_unit_ids (list[str]): List of parent organization unit IDs.
+        start_date (str): The start date for data extraction.
+        end_date (str): The end date for data extraction.
+
+    Returns:
+        pl.DataFrame: The extracted dataset data for the valid descendant organization units.
+    """
     # Step 1: Get all descendants
     all_descendants = set()
     for org_unit_id in parent_org_unit_ids:
@@ -404,8 +438,32 @@ def fetch_dataset_data_for_valid_descendants(
 
 
 def fetch_dataset_data_for_valid_group_orgunits(
-    dhis, dataset_id, org_unit_group_ids, start_date, end_date
-):
+    dhis: DHIS2,
+    dataset_id: str,
+    org_unit_group_ids: list[str],
+    start_date: datetime,
+    end_date: datetime,
+) -> pl.DataFrame:
+    """Fetch dataset data for valid organization units that belong to specified org unit groups.
+
+    This function retrieves organization units from the specified groups, filters them to include
+    only those linked to the given dataset, and then extracts the dataset data for these valid
+    organization units within the specified date range.
+
+    Args:
+        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
+        dataset_id (str): The ID of the dataset.
+        org_unit_group_ids (list[str]): List of organization unit group IDs.
+        start_date (datetime): The start date for data extraction.
+        end_date (datetime): The end date for data extraction.
+
+    Returns:
+        pl.DataFrame: The extracted dataset data for the valid organization units in the specified
+        groups.
+
+    Raises:
+        Exception: If fetching dataset org units or extracting the dataset fails.
+    """
     valid_org_units = []
 
     # Step 1: Get dataset-linked org units
@@ -502,7 +560,7 @@ def extract_raw_data(
             include_children=include_children,
         )
     except Exception as e:
-        if len(ou_ids) > 0:
+        if len(ou_ids) > 0 and include_children:
             current_run.log_info(
                 f"Fetching data cutting request for all descendants of orgunits: {ou_ids}"
             )
