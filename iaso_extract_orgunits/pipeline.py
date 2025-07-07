@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unicodedata
@@ -13,13 +14,13 @@ import geopandas as gpd
 import polars as pl
 import topojson as tp
 from openhexa.sdk import (
-    Dataset,
     IASOConnection,
     current_run,
     parameter,
     pipeline,
     workspace,
 )
+from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.toolbox.iaso import IASO, dataframe
 from shapely.geometry import MultiPolygon, Point, Polygon
 from sqlalchemy import create_engine
@@ -117,6 +118,7 @@ def iaso_extract_orgunits(
     iaso_client = authenticate_iaso(iaso_connection)
 
     org_units_df = fetch_org_units(iaso_client, ou_type_id)
+    org_units_df = org_units_df.select(sorted(org_units_df.columns)).sort(org_units_df.columns)
 
     output_file_path = export_to_file(
         org_units_df=org_units_df,
@@ -286,6 +288,7 @@ def export_to_file(
 
     if output_format in {".gpkg", ".geojson", ".shp", ".topojson"}:
         geo_df = _prepare_geodataframe(org_units_df)
+        geo_df = geo_df.sort_values(by=list(geo_df.columns)).reset_index(drop=True)
 
         if output_format == ".shp":
             for col in geo_df.select_dtypes(
@@ -326,6 +329,9 @@ def export_to_file(
             org_units_df.to_pandas().to_excel(output_file_path, index=False)
 
     current_run.add_file_output(output_file_path.as_posix())
+    if output_format == ".shp":
+        for suffix in [".shx", ".dbf", ".prj", ".cpg"]:
+            current_run.add_file_output(output_file_path.with_suffix(suffix).as_posix())
 
     return output_file_path
 
@@ -370,41 +376,28 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
     Args:
         file_path: Path to the exported file to be added to the dataset
         dataset: Target dataset for export
-
-    Raises:
-        RuntimeError: If dataset export fails
     """
-    try:
-        stem = Path(file_path).stem
-        match = re.match(r"^(.*)_\d{4}-\d{2}-\d{2}_\d{2}:\d{2}$", stem)
-        file_name = match.group(1) if match else clean_string(stem)
-
-        version = _get_or_create_dataset_version(dataset, file_name)
-
-        try:
-            version.add_file(file_path, file_path.name)
-        except ValueError as err:
-            if err.args and "already exists" in err.args[0]:
-                msg_critical = (
-                    f"File `{file_path.name}` already exists in dataset version `{version.name}`. "
-                )
-                current_run.log_critical(msg_critical)
-
-                file_name = file_path.with_name(
-                    f"{file_path.name}_{datetime.now().strftime('%Y-%m-%d_%H:%M')}{file_path.suffix}"
-                ).name
-
-                current_run.log_info(f"Renaming file to `{file_name}` to avoid conflict")
-
-                version.add_file(file_path, file_name)
-
+    latest_version = dataset.latest_version
+    if bool(latest_version) and in_dataset_version(file_path, latest_version):
         current_run.log_info(
-            f"File {file_path.name} added to dataset `{dataset.name}` in `{version.name}` version"
+            f"Organizational units file `{file_path.name}` already exists in dataset version "
+            f"`{latest_version.name}` and no changes have been detected"
         )
+        return
 
-    except Exception as err:
-        current_run.log_error(f"Dataset export failed: {err}")
-        raise RuntimeError("Dataset export operation failed") from err
+    version_number = int(latest_version.name.lstrip("v")) + 1 if latest_version else 1
+    version = dataset.create_version(f"v{version_number}")
+    
+    if file_path.suffix != ".shp":
+        version.add_file(file_path, file_path.name)
+    else:
+        for suffix in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+            version.add_file(file_path.with_suffix(suffix), file_path.with_suffix(suffix).name)
+
+    current_run.log_info(
+        f"Organizational units file `{file_path.name}` successfully added to {dataset.name} "
+        f"dataset in version `{version.name}`"
+    )
 
 
 def _generate_output_file_path(
@@ -538,11 +531,39 @@ def _get_driver(output_format: str) -> str:
     }[output_format]
 
 
-def _get_or_create_dataset_version(dataset: Dataset, name: str) -> Dataset.Version:
-    """Get existing or create new dataset version."""  # noqa: DOC201
-    return next((v for v in dataset.versions if v.name == name), None) or dataset.create_version(
-        name
-    )
+def sha256_of_file(file_path: Path) -> str:
+    """Calculate the SHA-256 hash of a file.
+
+    Args:
+        file_path (Path): Path to the file.
+
+    Returns:
+        str: SHA-256 hash of the file content.
+    """
+    hasher = hashlib.sha256()
+    with file_path.open("rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def in_dataset_version(file_path: Path, dataset_version: DatasetVersion) -> bool:
+    """Check if a file is in the specified dataset version.
+
+    Args:
+        file_path (Path): Path to the file.
+        dataset_version (DatasetVersion): The dataset version to check against.
+
+    Returns:
+        bool: True if the file is in the dataset version, False otherwise.
+    """
+    file_hash = sha256_of_file(file_path)
+    for file in dataset_version.files:
+        remote_hash = hashlib.sha256()
+        remote_hash.update(file.read())
+        if file_hash == remote_hash.hexdigest():
+            return True
+    return False
 
 
 if __name__ == "__main__":
