@@ -34,13 +34,18 @@ def get_dhis2_client(connection: DHIS2Connection) -> DHIS2:
     return DHIS2(connection=connection, cache_dir=cache_dir)
 
 
-def validate_mapping_structure(mapping_data: dict[str, Any]) -> bool:
+def validate_mapping_structure(
+    mapping_data: dict[str, Any], different_org_units: bool = False
+) -> bool:
     """Validate mapping file structure.
 
     Returns:
         bool: True if structure is valid, False otherwise.
     """
     required_keys = ["dataElements", "categoryOptionCombos"]
+    
+    if different_org_units:
+        required_keys.append("orgUnits")
 
     for key in required_keys:
         if key not in mapping_data:
@@ -95,6 +100,8 @@ def apply_data_mappings(
         "unmapped_category_option_combos": 0,
         "mapped_attribute_option_combos": 0,
         "unmapped_attribute_option_combos": 0,
+        "mapped_org_units": 0,
+        "unmapped_org_units": 0,
         "final_count": 0,
     }
 
@@ -138,6 +145,22 @@ def apply_data_mappings(
             lambda x: aoc_mapping.get(x, x), return_dtype=pl.Utf8
         )
         data_values = data_values.with_columns(mapping_expr)
+    
+    # Apply organization unit mappings
+    ou_mapping = mapping.get("orgUnits", {})
+    if ou_mapping and "organisation_unit_id" in data_values.columns:
+        # Filter for mapped org units
+        mapped_ous = list(ou_mapping.keys())
+        data_values = data_values.filter(pl.col("organisation_unit_id").is_in(mapped_ous))
+        stats["mapped_org_units"] = len(data_values)
+        stats["unmapped_org_units"] = original_count - len(data_values)
+
+        # Apply mapping
+        mapping_expr = pl.col("organisation_unit_id").map_elements(
+            lambda x: ou_mapping.get(x, x), return_dtype=pl.Utf8
+        )
+        data_values = data_values.with_columns(mapping_expr)
+    
     stats["final_count"] = len(data_values)
     return data_values, stats
 
@@ -234,6 +257,14 @@ def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]
     default=True,
     required=False,
 )
+@parameter(
+    "different_org_units",
+    type=bool,
+    name="Different Organization Units",
+    help="Enable if source and target DHIS2 instances have different org unit IDs",
+    default=False,
+    required=False,
+)
 def dhis2_to_dhis2_data_elements(
     source_connection: DHIS2Connection,
     target_connection: DHIS2Connection,
@@ -242,19 +273,24 @@ def dhis2_to_dhis2_data_elements(
     start_date: str,
     end_date: str,
     dry_run: bool = False,
+    different_org_units: bool = False,
 ):
     """Extract data values from source DHIS2 and write to target DHIS2 with mappings."""
     # Initialize clients
     source_dhis2, target_dhis2 = validate_connections(source_connection, target_connection)
 
     # Load and validate mappings
-    mapping_data = load_and_validate_mappings(mapping_file, source_dhis2, target_dhis2)
+    mapping_data = load_and_validate_mappings(
+        mapping_file, source_dhis2, target_dhis2, different_org_units
+    )
 
     # Extract source data
     source_data = extract_source_data(source_dhis2, dataset_id, start_date, end_date)
 
     # Validate org units
-    validated_data = validate_org_units(source_data, target_dhis2)
+    validated_data = validate_org_units(
+        source_data, target_dhis2, mapping_data, different_org_units
+    )
 
     # Transform data values
     transformed_data, transform_stats = transform_data_values(validated_data, mapping_data)
@@ -304,6 +340,7 @@ def load_and_validate_mappings(
     mapping_file: str,
     source_dhis2: DHIS2,
     target_dhis2: DHIS2,
+    different_org_units: bool = False,
 ) -> dict[str, dict[str, str]]:
     """Load and validate mapping file.
 
@@ -321,7 +358,7 @@ def load_and_validate_mappings(
         raise
 
     # Validate structure
-    if not validate_mapping_structure(mapping_data):
+    if not validate_mapping_structure(mapping_data, different_org_units):
         raise ValueError("Invalid mapping file structure")
 
     # Validate data elements
@@ -361,6 +398,29 @@ def load_and_validate_mappings(
         missing_target = [coc for coc, exists in target_exists.items() if not exists]
         if missing_target:
             current_run.log_warning(f"Missing target category option combos: {missing_target}")
+
+    # Validate organization units if different_org_units is enabled
+    if different_org_units:
+        ou_mapping = mapping_data.get("orgUnits", {})
+        if ou_mapping:
+            current_run.log_info(f"Validating {len(ou_mapping)} organization unit mappings...")
+
+            # Check source org units
+            source_ous = list(ou_mapping.keys())
+            source_exists = check_objects_exist(source_dhis2, "organisationUnit", source_ous)
+            missing_source = [ou for ou, exists in source_exists.items() if not exists]
+            if missing_source:
+                current_run.log_warning(f"Missing source organization units: {missing_source}")
+
+            # Check target org units
+            target_ous = list(ou_mapping.values())
+            target_exists = check_objects_exist(target_dhis2, "organisationUnit", target_ous)
+            missing_target = [ou for ou, exists in target_exists.items() if not exists]
+            if missing_target:
+                current_run.log_warning(f"Missing target organization units: {missing_target}")
+        else:
+            current_run.log_error("different_org_units is enabled but no orgUnits mapping found")
+            raise ValueError("Missing orgUnits mapping when different_org_units is enabled")
 
     current_run.log_info("✓ Mapping validation completed")
     return mapping_data
@@ -536,6 +596,8 @@ def extract_source_data(
 def validate_org_units(
     data_values: pl.DataFrame,
     target_dhis2: DHIS2,
+    mapping_data: dict[str, dict[str, str]],
+    different_org_units: bool = False,
 ) -> pl.DataFrame:
     """Validate that org units exist in target DHIS2 instance.
 
@@ -548,6 +610,54 @@ def validate_org_units(
     unique_org_units = data_values["organisation_unit_id"].unique().to_list()
     current_run.log_info(f"Checking {len(unique_org_units)} organization units...")
 
+    # If different_org_units is enabled, we need to check target org units after mapping
+    if different_org_units:
+        ou_mapping = mapping_data.get("orgUnits", {})
+        if ou_mapping:
+            # Map source org units to target org units
+            mapped_org_units = [ou_mapping.get(ou) for ou in unique_org_units if ou in ou_mapping]
+            # Remove None values (unmapped org units)
+            mapped_org_units = [ou for ou in mapped_org_units if ou is not None]
+            
+            current_run.log_info(f"Mapped {len(mapped_org_units)} org units to target system")
+            
+            # Check existence of mapped org units in target
+            if mapped_org_units:
+                org_unit_exists = check_objects_exist(
+                    target_dhis2, "organisationUnit", mapped_org_units
+                )
+                missing_target_org_units = [
+                    ou for ou, exists in org_unit_exists.items() if not exists
+                ]
+                
+                if missing_target_org_units:
+                    current_run.log_warning(
+                        f"Missing mapped org units in target: {len(missing_target_org_units)}"
+                    )
+                    for ou in missing_target_org_units[:5]:  # Log first 5
+                        current_run.log_warning(f"  - {ou}")
+                    if len(missing_target_org_units) > 5:
+                        current_run.log_warning(
+                            f"  ... and {len(missing_target_org_units) - 5} more"
+                        )
+            
+            # Filter data for source org units that have valid mappings
+            valid_source_org_units = [ou for ou in unique_org_units if ou in ou_mapping]
+            filtered_data = data_values.filter(
+                pl.col("organisation_unit_id").is_in(valid_source_org_units)
+            )
+            
+            current_run.log_info(f"✓ Filtered to {len(filtered_data)} data values")
+            current_run.log_info(f"  - Valid source org units: {len(valid_source_org_units)}")
+            invalid_count = len(unique_org_units) - len(valid_source_org_units)
+            current_run.log_info(f"  - Invalid source org units: {invalid_count}")
+            
+            return filtered_data
+        
+        current_run.log_error("different_org_units is enabled but no orgUnits mapping found")
+        raise ValueError("Missing orgUnits mapping when different_org_units is enabled")
+    
+    # Original logic for same org units
     # Check existence in target
     org_unit_exists = check_objects_exist(target_dhis2, "organisationUnit", unique_org_units)
 
@@ -602,6 +712,8 @@ def transform_data_values(
     current_run.log_info(
         f"  - Unmapped attribute option combos: {stats['unmapped_attribute_option_combos']}"
     )
+    current_run.log_info(f"  - Mapped org units: {stats['mapped_org_units']}")
+    current_run.log_info(f"  - Unmapped org units: {stats['unmapped_org_units']}")
 
     return transformed_data, stats
 
@@ -666,6 +778,8 @@ def generate_summary(
             "mapped_category_option_combos": transform_stats.get(
                 "mapped_category_option_combos", 0
             ),
+            "mapped_org_units": transform_stats.get("mapped_org_units", 0),
+            "unmapped_org_units": transform_stats.get("unmapped_org_units", 0),
         },
         "import": {
             "imported": post_results.get("imported", 0),
