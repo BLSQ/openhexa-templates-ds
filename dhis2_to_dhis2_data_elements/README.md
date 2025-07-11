@@ -1,6 +1,6 @@
 # DHIS2 to DHIS2 Data Elements Pipeline
 
-This OpenHEXA pipeline extracts data values from a source DHIS2 instance for a given dataset and writes the values to a target DHIS2 instance, using mappings for `dataElement` and `categoryOptionCombo` IDs.
+This OpenHEXA pipeline extracts data values from a source DHIS2 instance for a given dataset and writes the values to a target DHIS2 instance, using mappings for `dataElement` and `categoryOptionCombo`, `attributeOptionCombo` and `orgUnits` (optional) IDs.
 
 ## Features
 
@@ -46,6 +46,12 @@ The mapping file must be a JSON file with the following structure:
   "categoryOptionCombos": {
     "source_coc_id_1": "target_coc_id_1",
     "source_coc_id_2": "target_coc_id_2"
+  },
+  "attributeOptionCombos": {
+        "source_aoc": "target_aoc"
+    },
+  "orgUnits": {
+      "source_org_id": "target_org_id"
   }
 }
 ```
@@ -63,6 +69,12 @@ The mapping file must be a JSON file with the following structure:
     "HllvX50cXC0": "rQLFnNXXIL0",
     "RkbOhHwiOgW": "HllvX50cXC0",
     "J40PpdN4Wkk": "RkbOhHwiOgW"
+  },
+  "attributeOptionCombos": {
+        "GKkUPluq2QJ": "HllvX50cXC0"
+    },
+  "orgUnits": {
+      "FKdBi5MWJgQ": "FKdBi5MWJgQ"
   }
 }
 ```
@@ -96,7 +108,8 @@ openhexa pipeline run dhis2_to_dhis2_data_elements \\
   --dataset_id=BfMAe6Itzgt \\
   --mapping_file=mapping.json \\
   --start_date=2024-01-01 \\
-  --end_date=2024-01-31
+  --end_date=2024-01-31 \\
+  --different_org_units=false
 ```
 
 ### 2. Dry Run Mode
@@ -110,28 +123,9 @@ openhexa pipeline run dhis2_to_dhis2_data_elements \\
   --start_date=2024-01-01 \\
   --end_date=2024-01-31 \\
   --dry_run=true
+  --different_org_units=true
 ```
 
-### 3. Python API Usage
-
-```python
-from openhexa.sdk import workspace
-
-# Get connections
-source_conn = workspace.dhis2_connections.get("dhis2-source")
-target_conn = workspace.dhis2_connections.get("dhis2-target")
-
-# Run pipeline
-dhis2_to_dhis2_data_elements(
-    source_connection=source_conn,
-    target_connection=target_conn,
-    dataset_id="BfMAe6Itzgt",
-    mapping_file="mapping.json",
-    start_date="2024-01-01",
-    end_date="2024-01-31",
-    dry_run=False
-)
-```
 
 ## Pipeline Tasks
 
