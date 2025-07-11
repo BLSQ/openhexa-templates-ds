@@ -26,7 +26,7 @@ from openhexa.toolbox.dhis2.periods import Period, period_from_string
 
 def get_dhis2_client(connection: DHIS2Connection) -> DHIS2:
     """Initialize DHIS2 client with caching.
-    
+
     Returns:
         DHIS2: Configured DHIS2 client instance.
     """
@@ -36,7 +36,7 @@ def get_dhis2_client(connection: DHIS2Connection) -> DHIS2:
 
 def validate_mapping_structure(mapping_data: dict[str, Any]) -> bool:
     """Validate mapping file structure.
-    
+
     Returns:
         bool: True if structure is valid, False otherwise.
     """
@@ -56,7 +56,7 @@ def validate_mapping_structure(mapping_data: dict[str, Any]) -> bool:
 
 def check_objects_exist(dhis2: DHIS2, object_type: str, object_ids: list[str]) -> dict[str, bool]:
     """Check if objects exist in DHIS2 instance.
-    
+
     Returns:
         dict[str, bool]: Mapping of object IDs to existence status.
     """
@@ -82,7 +82,7 @@ def apply_data_mappings(
     data_values: pl.DataFrame, mapping: dict[str, dict[str, str]]
 ) -> tuple[pl.DataFrame, dict[str, Any]]:
     """Transform data values using mappings.
-    
+
     Returns:
         tuple[pl.DataFrame, dict[str, Any]]: Transformed data and statistics.
     """
@@ -144,7 +144,7 @@ def apply_data_mappings(
 
 def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]]:
     """Prepare data values for DHIS2 API payload.
-    
+
     Returns:
         list[dict[str, Any]]: List of data value dictionaries for API.
     """
@@ -271,7 +271,7 @@ def validate_connections(
     target_connection: DHIS2Connection,
 ) -> tuple[DHIS2, DHIS2]:
     """Validate source and target DHIS2 connections.
-    
+
     Returns:
         tuple[DHIS2, DHIS2]: Source and target DHIS2 client instances.
     """
@@ -306,7 +306,7 @@ def load_and_validate_mappings(
     target_dhis2: DHIS2,
 ) -> dict[str, dict[str, str]]:
     """Load and validate mapping file.
-    
+
     Returns:
         dict[str, dict[str, str]]: Validated mapping data.
     """
@@ -500,7 +500,7 @@ def extract_source_data(
     end_date: str,
 ) -> pl.DataFrame:
     """Extract data values from source DHIS2 instance.
-    
+
     Returns:
         pl.DataFrame: Extracted data values.
     """
@@ -538,7 +538,7 @@ def validate_org_units(
     target_dhis2: DHIS2,
 ) -> pl.DataFrame:
     """Validate that org units exist in target DHIS2 instance.
-    
+
     Returns:
         pl.DataFrame: Filtered data with valid org units only.
     """
@@ -577,7 +577,7 @@ def transform_data_values(
     mapping_data: dict[str, dict[str, str]],
 ) -> tuple[pl.DataFrame, dict[str, Any]]:
     """Transform data values using mappings.
-    
+
     Returns:
         tuple[pl.DataFrame, dict[str, Any]]: Transformed data and statistics.
     """
@@ -612,7 +612,7 @@ def post_to_target(
     dry_run: bool,
 ) -> dict[str, Any]:
     """Post transformed data to target DHIS2 instance.
-    
+
     Returns:
         dict[str, Any]: Import results from DHIS2 API.
     """
@@ -636,16 +636,6 @@ def post_to_target(
         )
         # Log results
         current_run.log_info("✓ Data posting completed")
-        current_run.log_info(f"  - Status: {response.get('status', 'unknown')}")
-        current_run.log_info(f"  - Imported: {response.get('imported', 0)}")
-        current_run.log_info(f"  - Updated: {response.get('updated', 0)}")
-        current_run.log_info(f"  - Ignored: {response.get('ignored', 0)}")
-
-        if response.get("conflicts"):
-            current_run.log_warning(f"Conflicts encountered: {len(response['conflicts'])}")
-            for conflict in response["conflicts"][:3]:  # Log first 3
-                current_run.log_warning(f"  - {conflict.get('value', 'unknown')}")
-
         return response
 
     except Exception as e:
@@ -678,11 +668,9 @@ def generate_summary(
             ),
         },
         "import": {
-            "status": post_results.get("status", "unknown"),
-            "imported": post_results.get("importCount", {}).get("imported", 0),
-            "updated": post_results.get("importCount", {}).get("updated", 0),
-            "ignored": post_results.get("importCount", {}).get("ignored", 0),
-            "conflicts": len(post_results.get("conflicts", [])),
+            "imported": post_results.get("imported", 0),
+            "updated": post_results.get("updated", 0),
+            "ignored": post_results.get("ignored", 0),
         },
     }
 
@@ -706,8 +694,7 @@ def generate_summary(
     current_run.log_info(f"Imported: {summary['import']['imported']} records")
     current_run.log_info(f"Updated: {summary['import']['updated']} records")
     current_run.log_info(f"Ignored: {summary['import']['ignored']} records")
-    if summary["import"]["conflicts"] > 0:
-        current_run.log_warning(f"Conflicts: {summary['import']['conflicts']}")
+
     current_run.log_info("========================")
 
 
