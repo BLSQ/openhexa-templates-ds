@@ -6,7 +6,7 @@ and categoryOptionCombo IDs.
 """
 
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +208,21 @@ def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]
     return valid_payload
 
 
+def calculate_relative_dates(days_back: int) -> tuple[str, str]:
+    """Calculate relative date range based on today's date.
+    
+    Args:
+        days_back (int): Number of days to go back from today for start date.
+    
+    Returns:
+        tuple[str, str]: (start_date, end_date) in YYYY-MM-DD format.
+    """
+    end_date = date.today()
+    start_date = end_date - timedelta(days=days_back)
+    
+    return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
+
+
 @pipeline("dhis2_to_dhis2_data_elements")
 @parameter(
     "source_connection",
@@ -265,6 +280,22 @@ def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]
     default=False,
     required=False,
 )
+@parameter(
+    "use_relative_dates",
+    type=bool,
+    name="Use Relative Dates",
+    help="Calculate date range relative to today instead of using fixed dates",
+    default=False,
+    required=False,
+)
+@parameter(
+    "days_back",
+    type=int,
+    name="Days Back",
+    help="Number of days to go back from today for start date (when using relative dates)",
+    default=365,
+    required=False,
+)
 def dhis2_to_dhis2_data_elements(
     source_connection: DHIS2Connection,
     target_connection: DHIS2Connection,
@@ -274,8 +305,22 @@ def dhis2_to_dhis2_data_elements(
     end_date: str,
     dry_run: bool = False,
     different_org_units: bool = False,
+    use_relative_dates: bool = False,
+    days_back: int = 365,
 ):
     """Extract data values from source DHIS2 and write to target DHIS2 with mappings."""
+    # Handle relative dates if enabled
+    if use_relative_dates:
+        calculated_start_date, calculated_end_date = calculate_relative_dates(days_back)
+        current_run.log_info(
+            f"Using relative dates: {calculated_start_date} to {calculated_end_date}"
+        )
+        current_run.log_info(f"  - Days back: {days_back}")
+        start_date = calculated_start_date
+        end_date = calculated_end_date
+    else:
+        current_run.log_info(f"Using provided dates: {start_date} to {end_date}")
+    
     # Initialize clients
     source_dhis2, target_dhis2 = validate_connections(source_connection, target_connection)
 
