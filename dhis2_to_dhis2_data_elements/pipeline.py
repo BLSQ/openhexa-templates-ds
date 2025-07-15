@@ -258,13 +258,13 @@ def calculate_relative_dates(days_back: int) -> tuple[str, str]:
     "start_date",
     type=str,
     name="Start Date (YYYY-MM-DD)",
-    required=True,
+    required=False,
 )
 @parameter(
     "end_date",
     type=str,
     name="End Date (YYYY-MM-DD)",
-    required=True,
+    required=False,
 )
 @parameter(
     "use_relative_dates",
