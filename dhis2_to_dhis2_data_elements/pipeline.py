@@ -2,7 +2,7 @@
 
 This pipeline extracts data values from a source DHIS2 instance for a given dataset
 and writes the values to a target DHIS2 instance, using mappings for dataElement
-and categoryOptionCombo IDs.
+and categoryOptionCombos IDs.
 """
 
 import json
