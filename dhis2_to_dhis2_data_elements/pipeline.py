@@ -42,8 +42,8 @@ def validate_mapping_structure(
     Returns:
         bool: True if structure is valid, False otherwise.
     """
-    required_keys = ["dataElements", "categoryOptionCombos"]
-    
+    required_keys = ["dataElements", "categoryOptionCombos", "attributeOptionCombos"]
+
     if different_org_units:
         required_keys.append("orgUnits")
 
@@ -145,7 +145,7 @@ def apply_data_mappings(
             lambda x: aoc_mapping.get(x, x), return_dtype=pl.Utf8
         )
         data_values = data_values.with_columns(mapping_expr)
-    
+
     # Apply organization unit mappings
     ou_mapping = mapping.get("orgUnits", {})
     if ou_mapping and "organisation_unit_id" in data_values.columns:
@@ -160,7 +160,7 @@ def apply_data_mappings(
             lambda x: ou_mapping.get(x, x), return_dtype=pl.Utf8
         )
         data_values = data_values.with_columns(mapping_expr)
-    
+
     stats["final_count"] = len(data_values)
     return data_values, stats
 
@@ -171,13 +171,6 @@ def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]
     Returns:
         list[dict[str, Any]]: List of data value dictionaries for API.
     """
-    required_columns = [
-        "data_element_id",
-        "organisation_unit_id",
-        "period",
-        "category_option_combo_id",
-        "value",
-    ]
     mapping_toolbox_dhis2_name = {
         "data_element_id": "dataElement",
         "organisation_unit_id": "orgUnit",
@@ -188,7 +181,7 @@ def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]
     }
 
     # Check for required columns
-    missing_columns = [col for col in required_columns if col not in data_values.columns]
+    missing_columns = [col for col in mapping_toolbox_dhis2_name if col not in data_values.columns]
     if missing_columns:
         current_run.log_error(f"Missing required columns: {missing_columns}")
         raise ValueError(f"Missing required columns: {missing_columns}")
@@ -210,16 +203,16 @@ def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]
 
 def calculate_relative_dates(days_back: int) -> tuple[str, str]:
     """Calculate relative date range based on today's date.
-    
+
     Args:
         days_back (int): Number of days to go back from today for start date.
-    
+
     Returns:
         tuple[str, str]: (start_date, end_date) in YYYY-MM-DD format.
     """
     end_date = date.today()
     start_date = end_date - timedelta(days=days_back)
-    
+
     return start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
 
 
@@ -229,14 +222,14 @@ def calculate_relative_dates(days_back: int) -> tuple[str, str]:
     type=DHIS2Connection,
     name="Source DHIS2 Connection",
     required=True,
-    default="dhis2-demo-2-41",
+    # default="dhis2-demo-2-41",
 )
 @parameter(
     "target_connection",
     type=DHIS2Connection,
     name="Target DHIS2 Connection",
     required=True,
-    default="dhis2-demo-2-39",
+    # default="dhis2-demo-2-39",
 )
 @parameter(
     "dataset_id",
@@ -245,13 +238,21 @@ def calculate_relative_dates(days_back: int) -> tuple[str, str]:
     connection="source_connection",
     name="Dataset ID",
     required=True,
-    default="TuL8IOPzpHh",
+    # default="TuL8IOPzpHh",
 )
 @parameter(
     "mapping_file",
     type=str,
     name="Mapping JSON filename",
     required=True,
+)
+@parameter(
+    "different_org_units",
+    type=bool,
+    name="Organization Unit IDs differ",
+    help="Enable if source and target DHIS2 instances have different org unit IDs (that must be mapped)",
+    default=False,
+    required=False,
 )
 @parameter(
     "start_date",
@@ -266,34 +267,26 @@ def calculate_relative_dates(days_back: int) -> tuple[str, str]:
     required=True,
 )
 @parameter(
-    "dry_run",
-    type=bool,
-    name="Dry Run Mode",
-    default=True,
-    required=False,
-)
-@parameter(
-    "different_org_units",
-    type=bool,
-    name="Different Organization Units",
-    help="Enable if source and target DHIS2 instances have different org unit IDs",
-    default=False,
-    required=False,
-)
-@parameter(
     "use_relative_dates",
     type=bool,
     name="Use Relative Dates",
-    help="Calculate date range relative to today instead of using fixed dates",
+    help="Calculate date range relative to today instead of using fixed start and end dates",
     default=False,
     required=False,
 )
 @parameter(
     "days_back",
     type=int,
-    name="Days Back",
+    name="Days Back (if relative dates)",
     help="Number of days to go back from today for start date (when using relative dates)",
     default=365,
+    required=False,
+)
+@parameter(
+    "dry_run",
+    type=bool,
+    name="Dry Run Mode",
+    default=True,
     required=False,
 )
 def dhis2_to_dhis2_data_elements(
@@ -320,7 +313,7 @@ def dhis2_to_dhis2_data_elements(
         end_date = calculated_end_date
     else:
         current_run.log_info(f"Using provided dates: {start_date} to {end_date}")
-    
+
     # Initialize clients
     source_dhis2, target_dhis2 = validate_connections(source_connection, target_connection)
 
@@ -663,9 +656,9 @@ def validate_org_units(
             mapped_org_units = [ou_mapping.get(ou) for ou in unique_org_units if ou in ou_mapping]
             # Remove None values (unmapped org units)
             mapped_org_units = [ou for ou in mapped_org_units if ou is not None]
-            
+
             current_run.log_info(f"Mapped {len(mapped_org_units)} org units to target system")
-            
+
             # Check existence of mapped org units in target
             if mapped_org_units:
                 org_unit_exists = check_objects_exist(
@@ -674,7 +667,7 @@ def validate_org_units(
                 missing_target_org_units = [
                     ou for ou, exists in org_unit_exists.items() if not exists
                 ]
-                
+
                 if missing_target_org_units:
                     current_run.log_warning(
                         f"Missing mapped org units in target: {len(missing_target_org_units)}"
@@ -685,23 +678,23 @@ def validate_org_units(
                         current_run.log_warning(
                             f"  ... and {len(missing_target_org_units) - 5} more"
                         )
-            
+
             # Filter data for source org units that have valid mappings
             valid_source_org_units = [ou for ou in unique_org_units if ou in ou_mapping]
             filtered_data = data_values.filter(
                 pl.col("organisation_unit_id").is_in(valid_source_org_units)
             )
-            
+
             current_run.log_info(f"✓ Filtered to {len(filtered_data)} data values")
             current_run.log_info(f"  - Valid source org units: {len(valid_source_org_units)}")
             invalid_count = len(unique_org_units) - len(valid_source_org_units)
             current_run.log_info(f"  - Invalid source org units: {invalid_count}")
-            
+
             return filtered_data
-        
+
         current_run.log_error("different_org_units is enabled but no orgUnits mapping found")
         raise ValueError("Missing orgUnits mapping when different_org_units is enabled")
-    
+
     # Original logic for same org units
     # Check existence in target
     org_unit_exists = check_objects_exist(target_dhis2, "organisationUnit", unique_org_units)
@@ -822,6 +815,15 @@ def generate_summary(
             "unmapped_data_elements": transform_stats.get("unmapped_data_elements", 0),
             "mapped_category_option_combos": transform_stats.get(
                 "mapped_category_option_combos", 0
+            ),
+            "unmapped_category_option_combos": transform_stats.get(
+                "unmapped_category_option_combos", 0
+            ),
+            "mapped_attribute_option_combos": transform_stats.get(
+                "mapped_attribute_option_combos", 0
+            ),
+            "unmapped_attribute_option_combos": transform_stats.get(
+                "unmapped_attribute_option_combos", 0
             ),
             "mapped_org_units": transform_stats.get("mapped_org_units", 0),
             "unmapped_org_units": transform_stats.get("unmapped_org_units", 0),
