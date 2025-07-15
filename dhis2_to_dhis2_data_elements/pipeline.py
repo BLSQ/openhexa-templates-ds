@@ -250,7 +250,7 @@ def calculate_relative_dates(days_back: int) -> tuple[str, str]:
     "different_org_units",
     type=bool,
     name="Organization Unit IDs differ",
-    help="Enable if source and target DHIS2 instances have different org unit IDs (that must be mapped)",
+    help="Enable if source and target DHIS2 instances have different org unit IDs (must be mapped)",
     default=False,
     required=False,
 )
