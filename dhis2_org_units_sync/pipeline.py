@@ -14,6 +14,7 @@ from openhexa.sdk import (
     pipeline,
     workspace,
 )
+from openhexa.sdk.client import openhexa
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import (
     get_organisation_unit_levels,
@@ -36,14 +37,14 @@ from utils import (
     name="DHIS2 source",
     type=DHIS2Connection,
     help="Credentials for the source DHIS2",
-    required=True,
+    required=False, # True
 )
 @parameter(
     "dhis2_target",
     name="DHIS2 target",
     type=DHIS2Connection,
     help="Credentials for the target DHIS2",
-    required=True,
+    required=False, # True
 )
 @parameter(
     "org_unit_level",
@@ -64,7 +65,6 @@ from utils import (
     default=False,
     required=True,
 )
-@pipeline("dhis2_org_units_sync")
 def dhis2_org_units_sync(
     dhis2_source: DHIS2Connection,
     dhis2_target: DHIS2Connection,
@@ -73,14 +73,14 @@ def dhis2_org_units_sync(
 ):
     """Write your pipeline orchestration here."""
     pipeline_path = Path(workspace.files_path) / "pipelines" / "dhis2_org_units_sync"
-
+ 
     try:
         configure_login(logs_path=pipeline_path / "logs", task_name="organisation_units_sync")
 
         sync_organisation_units(
             pipeline_path=pipeline_path,
-            source_connection=dhis2_source,
-            target_connection=dhis2_target,
+            source_connection=workspace.get_connection("dhis2-demo-2-39"),#dhis2_source,
+            target_connection=workspace.get_connection("dhis2-demo-2-41"),#dhis2_target,
             org_unit_level=org_unit_level,
             dry_run=dry_run,
         )
@@ -423,6 +423,36 @@ def configure_login(logs_path: Path, task_name: str):
         level=logging.INFO,
         format="%(asctime)s - %(message)s",
     )
+
+
+def get_woskpace_connection_name(connection_slug: str) -> str:
+    """Get the connection name from the workspace."""
+    connection_query = """
+        query getConnection($workspaceSlug:String!, $connectionSlug: String!) {
+            connectionBySlug(workspaceSlug:$workspaceSlug, connectionSlug: $connectionSlug) {
+                type
+                name
+                fields {
+                    code
+                    value
+                }
+            }
+        }
+        """
+    result = openhexa.execute(
+        query=connection_query,
+        variables={"workspaceSlug": workspace.slug, "connectionSlug": connection_slug}
+    )
+
+    if result is None:
+        raise ValueError(f"No response received for connection slug: '{connection_slug}'")    
+    if result.status_code != 200:        
+        raise Exception(f"Failed to retrieve data for connection: {result.json()}")
+    found_slug  = result.json().get("data", {}).get("connectionBySlug")
+    if found_slug is None:
+        raise ValueError(f"Connection with slug '{connection_slug}' not found in workspace '{workspace.slug}'")
+            
+    return found_slug.get("name")
 
 
 if __name__ == "__main__":
