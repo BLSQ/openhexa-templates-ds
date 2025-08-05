@@ -569,7 +569,7 @@ def extract_raw_data(
             include_children=include_children,
         )
     except Exception as e:
-        if len(ou_ids) > 0 and include_children:
+        if isinstance(ou_ids, list) and len(ou_ids) > 0 and include_children:
             current_run.log_info(
                 f"Fetching data cutting request for all descendants of orgunits: {ou_ids}"
             )
@@ -580,7 +580,7 @@ def extract_raw_data(
                 start_date=start.datetime,
                 end_date=end.datetime,
             )
-        elif len(ou_group_ids) > 0:
+        elif isinstance(ou_group_ids, list) and len(ou_group_ids) > 0:
             current_run.log_info(
                 f"Fetching data cutting request for all orgunits in groups: {ou_group_ids}"
             )
