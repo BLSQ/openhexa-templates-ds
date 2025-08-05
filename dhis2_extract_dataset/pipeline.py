@@ -87,6 +87,14 @@ from sqlalchemy import create_engine
     required=False,
     # default=["RXL3lPSK8oG"],
 )
+@parameter(
+    "max_nb_ou_extracted",
+    name="Optional: Maximum number of orgunits per request",
+    type=int,
+    required=False,
+    default=5,
+    help="This parameter is used to limit the number of orgunits per request.",
+)
 def dhis2_extract_dataset(
     dhis_con: DHIS2Connection,
     dataset: Dataset,
@@ -97,13 +105,14 @@ def dhis2_extract_dataset(
     include_children: bool,
     start: str,
     end: str | None,
+    max_nb_ou_extracted: int = 5,
 ):
     """Write your pipeline orchestration here.
 
     Pipeline functions should only call tasks and should never perform IO operations or expensive
     computations.
     """
-    dhis = get_dhis(dhis_con)
+    dhis = get_dhis(dhis_con, max_nb_ou_extracted)
     start = valid_date(start)
     end = valid_date(end)
     dhis2_name = get_dhis2_name_domain(dhis_con)
@@ -162,7 +171,7 @@ def create_extraction_folder(dhis2_name: str, datasets: dict, dataset_id: str) -
 
 
 # @dhis2_extract_dataset.task
-def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:  # noqa: D417
+def get_dhis(dhis_con: DHIS2Connection, max_nb_ou_extracted: int) -> DHIS2:  # noqa: D417
     """Creates and returns a DHIS2 object using the provided DHIS2Connection.
 
     Parameters
@@ -175,7 +184,7 @@ def get_dhis(dhis_con: DHIS2Connection) -> DHIS2:  # noqa: D417
 
     """
     dhis = DHIS2(dhis_con, cache_dir=Path(workspace.files_path) / ".cache")
-    dhis.data_value_sets.MAX_ORG_UNITS = 1
+    dhis.data_value_sets.MAX_ORG_UNITS = max_nb_ou_extracted
     dhis.data_value_sets.DATE_RANGE_DELTA = relativedelta.relativedelta(months=1)
     return dhis
 
