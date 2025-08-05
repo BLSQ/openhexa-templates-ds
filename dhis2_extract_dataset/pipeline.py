@@ -281,7 +281,8 @@ def check_parameters_validation(ou_ids: list[str], ou_group_ids: list[str]):
         and len(ou_group_ids) == 0,
         "ou_group_ids only": isinstance(ou_group_ids, list)
         and len(ou_group_ids) > 0
-        and len(ou_ids) is None,
+        and ou_ids is None
+        or len(ou_ids) == 0,
     }
     if sum([1 for condition in conditions.values() if condition]) > 1:
         current_run.log_error(
