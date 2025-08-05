@@ -326,12 +326,12 @@ def dhis2_to_dhis2_data_elements(
     source_data = extract_source_data(source_dhis2, dataset_id, start_date, end_date)
 
     # Validate org units
-    validated_data = validate_org_units(
-        source_data, target_dhis2, mapping_data, different_org_units
-    )
+    # validated_data = validate_org_units(
+    #    source_data, target_dhis2, mapping_data, different_org_units
+    # )
 
     # Transform data values
-    transformed_data, transform_stats = transform_data_values(validated_data, mapping_data)
+    transformed_data, transform_stats = transform_data_values(source_data, mapping_data)
 
     # Post to target
     post_results = post_to_target(target_dhis2, transformed_data, dry_run)
@@ -409,14 +409,14 @@ def load_and_validate_mappings(
         source_exists = check_objects_exist(source_dhis2, "dataElement", source_des)
         missing_source = [de for de, exists in source_exists.items() if not exists]
         if missing_source:
-            current_run.log_warning(f"Missing source data elements: {missing_source}")
+            current_run.log_warning(f"Data elements not found in source DHIS2: {missing_source}")
 
         # Check target data elements
         target_des = list(de_mapping.values())
         target_exists = check_objects_exist(target_dhis2, "dataElement", target_des)
         missing_target = [de for de, exists in target_exists.items() if not exists]
         if missing_target:
-            current_run.log_warning(f"Missing target data elements: {missing_target}")
+            current_run.log_warning(f"Data elements not found in target DHIS2: {missing_target}")
 
     # Validate category option combos
     coc_mapping = mapping_data.get("categoryOptionCombos", {})
@@ -428,14 +428,18 @@ def load_and_validate_mappings(
         source_exists = check_objects_exist(source_dhis2, "categoryOptionCombo", source_cocs)
         missing_source = [coc for coc, exists in source_exists.items() if not exists]
         if missing_source:
-            current_run.log_warning(f"Missing source category option combos: {missing_source}")
+            current_run.log_warning(
+                f"Category option combos not found in source DHIS2: {missing_source}"
+            )
 
         # Check target COCs
         target_cocs = list(coc_mapping.values())
         target_exists = check_objects_exist(target_dhis2, "categoryOptionCombo", target_cocs)
         missing_target = [coc for coc, exists in target_exists.items() if not exists]
         if missing_target:
-            current_run.log_warning(f"Missing target category option combos: {missing_target}")
+            current_run.log_warning(
+                f"Category option combos not found in target DHIS2: {missing_target}"
+            )
 
     # Validate organization units if different_org_units is enabled
     if different_org_units:
@@ -448,14 +452,18 @@ def load_and_validate_mappings(
             source_exists = check_objects_exist(source_dhis2, "organisationUnit", source_ous)
             missing_source = [ou for ou, exists in source_exists.items() if not exists]
             if missing_source:
-                current_run.log_warning(f"Missing source organization units: {missing_source}")
+                current_run.log_warning(
+                    f"Organization units not found in source DHIS2: {missing_source}"
+                )
 
             # Check target org units
             target_ous = list(ou_mapping.values())
             target_exists = check_objects_exist(target_dhis2, "organisationUnit", target_ous)
             missing_target = [ou for ou, exists in target_exists.items() if not exists]
             if missing_target:
-                current_run.log_warning(f"Missing target organization units: {missing_target}")
+                current_run.log_warning(
+                    f"Organization units not found in target DHIS2: {missing_target}"
+                )
         else:
             current_run.log_error("different_org_units is enabled but no orgUnits mapping found")
             raise ValueError("Missing orgUnits mapping when different_org_units is enabled")
@@ -735,7 +743,7 @@ def transform_data_values(
     current_run.log_info(f"{transformed_data.head(1)}")
     current_run.log_info("✓ Transformation completed")
     current_run.log_info(f"  - Original records: {stats['original_count']}")
-    current_run.log_info(f"  - Final records: {stats['final_count']}")
+    current_run.log_info(f"  - Final records (after null values filtered): {stats['final_count']}")
     current_run.log_info(f"  - Mapped data elements: {stats['mapped_data_elements']}")
     current_run.log_info(f"  - Unmapped data elements: {stats['unmapped_data_elements']}")
     current_run.log_info(
