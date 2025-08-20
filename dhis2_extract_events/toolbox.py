@@ -2,7 +2,7 @@
 
 import logging
 import re
-from typing import Any, Optional, Union
+from typing import Any
 
 import polars as pl
 from openhexa.toolbox.dhis2 import DHIS2
@@ -131,10 +131,10 @@ def join_object_names(
 def programs(
     dhis2: DHIS2,
     fields: str = "id,name,programType",
-    page: Optional[int] = None,
-    pageSize: Optional[int] = None,
-    filters: Optional[list[str]] = None,
-) -> Union[list[dict[str, Any]], dict[str, Any]]:
+    page: int | None = None,
+    page_size: int | None = None,
+    filters: list[str] | None = None,
+) -> list[dict[str, Any]] | dict[str, Any]:
     """Get program metadata from DHIS2.
 
     Parameters
@@ -145,7 +145,7 @@ def programs(
         Comma-separated DHIS2 fields to include in the response.
     page: int, optional
         Page number for paginated requests.
-    pageSize: int, optional
+    page_size: int, optional
         Number of results per page.
     filters: list of str, optional
         DHIS2 query filters.
@@ -167,9 +167,9 @@ def programs(
     if filters:
         params["filter"] = filters
 
-    if page and pageSize:
+    if page and page_size:
         params["page"] = page
-        params["pageSize"] = pageSize
+        params["pageSize"] = page_size
         response = dhis2.api.get("programs", params=params)
 
         program_stages = [format_program(ou, fields) for ou in response.get("programs", [])]
@@ -196,7 +196,8 @@ def get_programs(dhis2: DHIS2, filters: list[str] | None = None) -> pl.DataFrame
     Returns
     -------
     pl.DataFrame
-        Dataframe containing program stages metadata with the following columns: id, name, program_type.
+        Dataframe containing program stages metadata with the following columns:
+        id, name, program_type.
     """
     meta = programs(dhis2, fields="id,name,programType", filters=filters)
     schema = {"id": str, "name": str, "programType": str}
@@ -206,7 +207,9 @@ def get_programs(dhis2: DHIS2, filters: list[str] | None = None) -> pl.DataFrame
 
 def get_program_stages(dhis2: DHIS2, filters: list[str] | None = None) -> pl.DataFrame:
     """Extract programStages metadata.
-    We extract all of the programStages, including the ones that are not accessible from the programStages endpoint.
+
+    We extract all of the programStages, including the ones that are not accessible
+    from the programStages endpoint.
 
     Parameters
     ----------
@@ -218,12 +221,13 @@ def get_program_stages(dhis2: DHIS2, filters: list[str] | None = None) -> pl.Dat
     Returns
     -------
     pl.DataFrame
-        Dataframe containing program stages metadata with the following columns: program_stage_id, program_stage_name, program_id, program_name.
+        Dataframe containing program stages metadata with the following columns: program_stage_id,
+        program_stage_name, program_id, program_name.
     """
     meta = programs(dhis2, fields="id,name,programStages[id,name]", filters=filters)
     schema = {"id": str, "name": str, "programStages": list}
     df = pl.DataFrame(meta, schema=schema)
-    df_flat = (
+    return (
         df.explode("programStages")
         .with_columns(
             [
@@ -240,7 +244,6 @@ def get_program_stages(dhis2: DHIS2, filters: list[str] | None = None) -> pl.Dat
             ]
         )
     )
-    return df_flat
 
 
 # Modifying this function from the OH toolbox.
@@ -282,7 +285,10 @@ def extract_events(
         params = {
             "orgUnit": org_unit,
             "program": program_id,
-            "fields": "event,status,program,programStage,trackedEntity,enrollment,orgUnit,occurredAt,deleted,attributeOptionCombo,dataValues",
+            "fields": (
+                "event,status,program,programStage,trackedEntity,enrollment,"
+                "orgUnit,occurredAt,deleted,attributeOptionCombo,dataValues"
+            ),
             "totalPages": True,
         }
         if include_children:
@@ -312,7 +318,7 @@ def extract_events(
 
     df = pl.DataFrame(data, schema=schema)
 
-    df = (
+    return (
         df.explode("dataValues")
         .with_columns(
             [
@@ -337,5 +343,3 @@ def extract_events(
             ]
         )
     ).unique()
-
-    return df
