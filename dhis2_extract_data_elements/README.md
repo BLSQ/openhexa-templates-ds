@@ -13,32 +13,50 @@ This pipeline extracts data values for specified data elements from a DHIS2 inst
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | Source DHIS2 | DHIS2 Connection | Yes | - | Source DHIS2 instance to extract data from |
-| Data elements | List of String | Yes | - | Data elements to extract |
+| Data elements | List of String | Yes* | - | Data elements to extract |
+| Data element groups | List of String | No | - | Data element groups to extract |
 | Organisation units | List of String | No | - | IDs of organisation units to extract data from |
 | Organisation unit groups | List of String | No | - | IDs of organisation unit groups to extract data from |
 | Include children | Boolean | No | `False` | Whether to include children of the selected organisation units |
 | Start date | String | Yes | `2020-01-01` | Start date for the extraction (YYYY-MM-DD) |
-| End date | String | No | - | End date for the extraction (today by default) |
-| Output file | String | No | - | Custom output file path in workspace (default: auto-generated) |
+| End date | String | No | Today | End date for the extraction (YYYY-MM-DD) |
+| Output file | String | No | Auto-generated | Custom output file path in workspace |
+| Output dataset | Dataset | No | - | OpenHEXA dataset. A new version will be created if new content is detected |
+| Output DB table | String | No | - | Database table name for storing the extracted data |
+
+*Data elements is required unless Data element groups is provided
 
 ⚠️
 
 A valid DHIS2 data extraction request is composed of *one unit of information for each dimension*:
 
-* Data dimension (what?): Data elements
-* Spatial dimension (where?): Organisation units **or** Organisation unit groups
+* Data dimension (what?): Data elements **or** Data element groups
+* Spatial dimension (where?): Organisation units **or** Organisation unit groups (at least one required)
 * Temporal dimension (when?): Start date, End date
-
-Multiple parameters per dimension are not allowed. For example, you cannot specify both organisation units and organisation unit groups, or both start date and end date.
 
 ## Output
 
-The pipeline generates a Parquet file containing the extracted data values with enriched metadata. By default, the file is saved to:
+The pipeline supports three output options that can be used individually or in combination:
+
+### 1. File Output (Parquet)
+By default, the pipeline generates a Parquet file containing the extracted data values with enriched metadata. The file is saved to:
 
 ```
 <workspace>/pipelines/dhis2_extract_data_elements/<timestamp>/data_values.parquet
 ```
 
+You can specify a custom output path using the `Output file` parameter.
+
+### 2. OpenHEXA Dataset
+When an `Output dataset` is specified, the pipeline will:
+- Check if the data has changed compared to the latest dataset version
+- Create a new version (v1, v2, v3, etc.) only if new content is detected
+- Skip versioning if the data is unchanged
+
+### 3. Database Table
+When an `Output DB table` name is provided, the extracted data will be written directly to the workspace database, replacing any existing table with the same name.
+
+### Output Data Structure
 The output includes:
 - DHIS2 data values for the specified data elements
 - Periods
@@ -79,9 +97,15 @@ The output includes:
 }
 }%%
 flowchart TD
-    A[Connect to DHIS2] --> B[Fetch metadata]
-    B --> C[Validate data request]
-    C --> D[Extract data values in batch]
-    D --> E[Join metadata]
-    E --> F[Write as Parquet]
+    A[Connect to DHIS2]
+    A --> C[Fetch metadata]
+    C --> D[Validate data request]
+    D --> E{Data type?}
+    E -->|Data elements| F[Extract data elements]
+    E -->|Data element groups| G[Extract data element groups]
+    F --> H[Join metadata names]
+    G --> H
+    H --> J[Write to Parquet file]
+    H --> K[Create dataset version]
+    H --> L[Write to database table]
 ```
