@@ -23,6 +23,8 @@ This pipeline extracts analytics data from a DHIS2 instance, including data elem
 | Start period | String | Yes | - | Start period for the extraction (DHIS2 format) |
 | End period | String | No | Current period | End period for the extraction (DHIS2 format) |
 | Output file | String | No | Auto-generated | Custom output file path in workspace |
+| Output dataset | Dataset | No | - | OpenHEXA dataset. A new version will be created if new content is detected |
+| Output DB table | String | No | - | Database table name for storing the extracted data |
 
 ⚠️
 
@@ -36,12 +38,27 @@ Multiple parameters per dimension are not allowed. For example, you cannot speci
 
 ## Output
 
-The pipeline generates a Parquet file containing the extracted analytics data with enriched metadata. By default, the file is saved to:
+The pipeline supports three output options that can be used individually or in combination:
+
+### 1. File Output (Parquet)
+By default, the pipeline generates a Parquet file containing the extracted analytics data with enriched metadata. The file is saved to:
 
 ```
 <workspace>/pipelines/dhis2_extract_analytics/<timestamp>/data_values.parquet
 ```
 
+You can specify a custom output path using the `Output file` parameter.
+
+### 2. OpenHEXA Dataset
+When an `Output dataset` is specified, the pipeline will:
+- Check if the data has changed compared to the latest dataset version
+- Create a new version (v1, v2, v3, etc.) only if new content is detected
+- Skip versioning if the data is unchanged
+
+### 3. Database Table
+When an `Output DB table` name is provided, the extracted data will be written directly to the workspace database, replacing any existing table with the same name.
+
+### Output Data Structure
 The output includes:
 - Data values for selected data elements or indicators
 - Periods
@@ -82,9 +99,12 @@ The output includes:
 }
 }%%
 flowchart TB
-    A[Connect to DHIS2] --> B[Fetch metadata]
-    B --> C[Validate request parameters]
-    C --> D[Extract analytics data]
-    D --> E[Join metadata names]
-    E --> F[Write as Parquet]
+    A[Connect to DHIS2]
+    A --> C[Fetch metadata]
+    C --> D[Validate request parameters]
+    D --> E[Extract analytics data]
+    E --> F[Join metadata]
+    F --> H[Write to Parquet file]
+    F --> I[Create dataset version]
+    F --> J[Write to database table]
 ```
