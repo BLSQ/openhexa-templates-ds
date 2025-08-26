@@ -154,7 +154,8 @@ def dhis_event_extract(
         programs=program_metadata,
     )
 
-    events_complete = events_complete.select(config.output_cols)
+    output_cols = [col for col in config.output_cols if col in events_complete.columns]
+    events_complete = events_complete.select(output_cols)
 
     current_run.log_info("Sucessfully joined object names to output data")
 

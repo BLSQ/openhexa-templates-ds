@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 import polars as pl
+from openhexa.sdk import current_run
 from openhexa.toolbox.dhis2 import DHIS2
 
 logger = logging.getLogger(__name__)
@@ -300,7 +301,13 @@ def extract_events(
         if occurred_before:
             params["occurredBefore"] = occurred_before
         for page in dhis2.api.get_paged("tracker/events", params=params):
-            data.extend(page["instances"])
+            if "instances" in page:
+                data.extend(page["instances"])
+            elif "events" in page:
+                data.extend(page["events"])
+            else:
+                current_run.log_error(f"Unknown page structure: {page}")
+                raise ValueError(f"Unknown page structure: {page}")
 
     schema = {
         "event": str,
