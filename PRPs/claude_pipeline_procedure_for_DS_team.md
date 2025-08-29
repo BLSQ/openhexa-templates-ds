@@ -82,7 +82,12 @@ pip install -e ".[dev]"
 # View menu -> Open View -> Test Explorer
 # Tests in the ./tests/ folder should now be discoverable
 ```
-
+**Method 2: dhis2-pipelines.code-workspace**
+```bash
+# Update dhis2-pipelines.code-workspace with your pipeline folder
+# go to the main folder on bash and run:
+code dhis2-pipelines.code-workspace
+```
 **Method 3: Repository-Wide (Less Ideal)**
 ```bash
 # If you must work from repository root:
