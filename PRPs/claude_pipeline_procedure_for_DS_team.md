@@ -119,11 +119,12 @@ code .
    repo/
      PRPs/
        <feature>.md                # your product requirement for the pipeline
-     prp_base.md                   # the team base template (enforces Docker+tests by default)
+       templates/
+         DHIS2_base.md             # the team base template (enforces Docker+tests by default)
    ```
 
 3) **Open the right tabs in VS Code**
-   - Open `prp_base.md` and your feature PRP (`PRPs/<feature>.md`) in editor tabs. Claude will use open tabs as context.
+   - Open `PRPs/templates/DHIS2_base.md` and your feature PRP (`PRPs/<feature>.md`) in editor tabs. Claude will use open tabs as context.
    - Open any existing `pipelines/<pipeline_name>/pipeline.py` if you’re iterating.
 
 ---
@@ -144,20 +145,20 @@ Write/confirm the feature PRP (`PRPs/<feature>.md`):
 
 ## 2) Ask Claude to scaffold everything (code + Docker + tests)
 
-With `prp_base.md` and the feature PRP open, start a Claude session and paste one of these prompts.
+With `PRPs/templates/DHIS2_base.md` and the feature PRP open, start a Claude session and paste one of these prompts.
 
 ### Prompt A — New pipeline
 ```
-Use the rules in prp_base.md and the requirements in PRPs/<feature>.md.
+Use the rules in PRPs/templates/DHIS2_base.md and the requirements in PRPs/<feature>.md.
 Create a new pipeline at pipelines/<pipeline_name>/:
-- pipeline.py with @pipeline/@task/@parameter per prp_base.md
+- pipeline.py with @pipeline/@task/@parameter per DHIS2_base.md
 - README.md and requirements.txt
 Also generate the default local test harness:
 - docker-compose.dhis2.yml (core 40.x, Sierra Leone DB seed)
 - docker/Dockerfile.tests (pytest + openhexa-toolbox + openhexa.sdk)
 - Makefile with up/test/down targets
 - tests/ with unit + integration (dry-run) based on the PRP's Testing section
-Follow the Success checklist in prp_base.md. Show diffs only, no placeholders.
+Follow the Success checklist in DHIS2_base.md. Show diffs only, no placeholders.
 ```
 
 ### Prompt B — Iterate/fix based on failing tests
