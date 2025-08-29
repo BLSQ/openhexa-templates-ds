@@ -132,7 +132,11 @@ def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:
 
     Raises:
         ValueError: If the 'period' column contains an unrecognized format.
+        RuntimeError: If the df passed as argument is not of type pd.DataFrame
     """
+    if not isinstance(df, pd.DataFrame):
+        raise RuntimeError("df is not of type pd.DataFrame")
+
     # Only process if "period" exists
     if "period" not in df.columns:
         return df
@@ -161,7 +165,6 @@ def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:
         df["period"] = pd.to_datetime(df["period"])
     except Exception:
         raise ValueError(f"Unrecognized period format: {sample_value}") from None
-
     return df
 
 
