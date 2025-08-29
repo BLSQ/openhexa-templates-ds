@@ -110,8 +110,9 @@ code .
 - [ ] **Virtual environment** created and activated
 - [ ] **Pipeline dependencies** installed via `pip install -e ".[dev]"`  
 - [ ] **VSCode Testing panel** discovers tests automatically
-- [ ] **Docker DHIS2** starts successfully with `make up`
+- [ ] **Docker DHIS2** starts successfully with `make up` (Note: DHIS2 setup can be complex and may require troubleshooting)
 - [ ] **Unit tests** pass with `pytest tests/ -k "not integration" -v`
+- [ ] **Integration tests** can be skipped initially if DHIS2 setup fails - focus on unit tests first
 
 ### Development Workflow Setup
 
@@ -246,4 +247,43 @@ Before merging:
 3. `make up && make test`.  
 4. Review diffs and logs, iterate with Claude using failing outputs.  
 5. Merge only when the acceptance list is fully green.
+
+## 8) DHIS2 Setup Troubleshooting (Common Issues)
+
+**DHIS2 container exits immediately:**
+- Check logs: `docker logs sync_dhis2_to_dhis2-dhis2-1`
+- Common causes: Missing dhis.conf, database connection issues, insufficient memory
+
+**"File /opt/dhis2/dhis.conf cannot be read":**
+```bash
+# In your pipeline directory, create proper config
+mkdir -p data
+cat > data/dhis.conf << 'EOF'
+connection.dialect = org.hibernate.dialect.PostgreSQLDialect
+connection.driver_class = org.postgresql.Driver
+connection.url = jdbc:postgresql://postgres:5432/dhis2
+connection.username = dhis2
+connection.password = dhis2
+connection.schema = public
+EOF
+```
+
+**Integration tests fail due to DHIS2 issues:**
+
+```bash
+# Focus on unit tests first - they don't need DHIS2
+pytest tests/ -k "not integration" -v
+
+# Specific unit test examples
+pytest tests/test_unit_transforms.py -v
+pytest tests/test_mapping_schema.py -v
+```
+
+**DHIS2 takes too long to start:**
+Say that the pipeline folder is sync_dhis2_to_dhis2-dhis2 then:
+- First startup can take 5-10 minutes for database initialization
+- Monitor progress: `docker logs -f sync_dhis2_to_dhis2-dhis2-1`
+- Check memory: Docker Desktop needs 4GB+ RAM allocated
+
+**For production pipelines:** Consider using DHIS2 demo instances or simpler mock servers for testing.
 
