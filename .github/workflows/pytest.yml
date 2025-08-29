@@ -1,10 +1,10 @@
-name: OPENHEXA TEMPLATES TESTS
+name: PYTEST
 
 on:
   push:
     paths:
       - ".github/workflows/pytest.yml"
-      - "*/pipeline.py"
+      - "iaso_extract_submissions/**"
   pull_request:
     paths:
       - ".github/workflows/pytest.yml"
@@ -19,12 +19,6 @@ jobs:
       - uses: actions/setup-python@v2
         with:
           python-version: '3.11'
-
-      - name: Configure OpenHEXA CLI
-        uses: blsq/openhexa-cli-action@v1
-        with:
-          workspace:  "ds-templates"
-          token: ${{ secrets.OH_TOKEN }}
 
       - name: Install dependencies
         run: |
