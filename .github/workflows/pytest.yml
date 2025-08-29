@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - ".github/workflows/pytest.yml"
+      - "*/pipeline.py"
   pull_request:
     paths:
       - ".github/workflows/pytest.yml"
@@ -11,17 +12,19 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12"]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v2
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.11'
+
+      - name: Configure OpenHEXA CLI
+        uses: blsq/openhexa-cli-action@v1
+        with:
+          workspace:  "ds-templates"
+          token: ${{ secrets.OH_TOKEN }}
 
       - name: Install dependencies
         run: |
