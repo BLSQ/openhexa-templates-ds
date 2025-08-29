@@ -1,6 +1,9 @@
 name: OPENHEXA TEMPLATES TESTS
 
 on: [push, pull_request]
+  push:
+    paths:
+      - ".github/workflows/pytest.yml"
 
 jobs:
   build:
