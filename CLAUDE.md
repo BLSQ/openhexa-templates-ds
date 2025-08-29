@@ -4,10 +4,84 @@
 
 ---
 
+## 0) Data Science Team - Required Local Machine Setup
+
+### Essential Software Requirements
+```bash
+# 1) Python 3.11+ (REQUIRED)
+python3.11 --version  # Should show Python 3.11.x
+
+# 2) Docker Desktop (REQUIRED for DHIS2 testing)
+docker --version      # Should show Docker version 20.0+
+docker compose version # Should show Compose version 2.0+
+
+# 3) Git (REQUIRED)
+git --version         # Should show Git 2.30+
+
+# 4) VSCode with Extensions (STRONGLY RECOMMENDED)
+# Required VSCode Extensions:
+# - Python (ms-python.python)
+# - Python Test Explorer (ms-python.python) 
+# - Python Debugger (ms-python.debugpy)
+# - Ruff (charliermarsh.ruff)
+# - Docker (ms-azuretools.vscode-docker)
+```
+
+### VSCode Configuration Setup
+```bash
+# 1) Install Python extension in VSCode
+# 2) Open pipeline project folder in VSCode  
+# 3) Create virtual environment
+python3.11 -m venv venv
+
+# 4) Activate virtual environment (VSCode should prompt to use it)
+source venv/bin/activate  # Linux/Mac
+# OR
+venv\Scripts\activate     # Windows
+
+# 5) Install pipeline in development mode
+pip install -e ".[dev]"
+
+# 6) VSCode should auto-detect pytest configuration
+# Open Command Palette (Ctrl/Cmd+Shift+P) -> "Python: Configure Tests" -> "pytest"
+```
+
+### Docker Setup Verification
+```bash
+# Verify Docker can pull and run DHIS2
+docker pull dhis2/core:40.8.0
+
+# Test Docker networking (required for DHIS2 tests)
+docker run --rm --network host alpine:latest wget -O- http://httpbin.org/ip
+
+# Verify Docker Compose works
+docker compose --version
+```
+
+### Local Development Environment Checklist
+- [ ] **Python 3.11+** installed and accessible via `python3.11`
+- [ ] **Docker Desktop** running and accessible via `docker` command
+- [ ] **VSCode** with Python extension installed
+- [ ] **Git** configured with user credentials
+- [ ] **Virtual environment** created and activated in VSCode
+- [ ] **Pipeline dependencies** installed via `pip install -e ".[dev]"`
+- [ ] **VSCode Testing panel** shows discovered tests
+- [ ] **Docker DHIS2** can start via `make up`
+- [ ] **Unit tests** pass via `pytest tests/ -k "not integration"`
+
+### Troubleshooting Local Setup
+- **Python 3.11 not found**: Install via package manager or pyenv
+- **Docker permission denied**: Add user to docker group or use Docker Desktop
+- **VSCode doesn't find tests**: Check Python interpreter points to venv
+- **pip install fails**: Upgrade pip with `pip install --upgrade pip`
+- **Docker DHIS2 fails**: Check Docker has 4GB+ RAM allocated
+
+---
+
 ## 1) Scope
 - Extract, transform, write, or sync DHIS2 data using OpenHEXA pipelines.
 - Pipelines are structured with `@pipeline`, `@task`, `@parameter` decorators only.
-- Use `openhexa-toolbox.dhis2` helpers whenever possible (avoid raw HTTP if a helper exists).
+- Use `openhexa.toolbox.dhis2` helpers whenever possible (avoid raw HTTP if a helper exists).
 
 ---
 
@@ -22,12 +96,12 @@
 
 ## 3) Required Parameters (adapt per pipeline)
 ```python
-@parameter("source_connection", type=DHIS2Connection, required=True)
-@parameter("target_connection", type=DHIS2Connection, required=False, description="Required for write/sync")
-@parameter("dataset_id", type=str, required=True)
-@parameter("period", type=str, description="YYYYMM or YYYYQn, e.g., 2024Q1", required=True)
-@parameter("mapping_file", type=File, description="JSON with dataElements & categoryOptionCombos maps", required=True)
-@parameter("dry_run", type=bool, default=True)
+@parameter("source_connection", type=DHIS2Connection, required=True, help="Source DHIS2 instance")
+@parameter("target_connection", type=DHIS2Connection, required=False, help="Required for write/sync operations")
+@parameter("dataset_id", type=str, required=True, help="DHIS2 dataset identifier")
+@parameter("period", type=str, required=True, help="YYYYMM or YYYYQn format, e.g., 2024Q1")
+@parameter("mapping_file", type=str, required=True, help="Path to JSON with dataElements & categoryOptionCombos mappings")
+@parameter("dry_run", type=bool, default=True, help="Execute in dry-run mode")
 ```
 > For extraction-only pipelines, omit unneeded parameters. For sync/write, `target_connection` is required.
 
@@ -96,10 +170,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Python deps
 RUN pip install --no-cache-dir \
-    openhexa.sdk openhexa-toolbox pytest pytest-cov ruff mypy
+    openhexa.sdk openhexa-toolbox[dhis2] pytest pytest-cov ruff mypy
 
 # Copy project
 COPY . /workspace
+
+# Set Python path to include the workspace
+ENV PYTHONPATH=/workspace
 
 # Default command will run the test suite
 CMD ["pytest", "-q"]
@@ -116,16 +193,73 @@ DHIS2_IMAGE=dhis2/core:40.8.0
 DHIS2_DB_DUMP_URL=https://databases.dhis2.org/sierra-leone/2.40/dhis2-db-sierra-leone.sql.gz
 ```
 
-### 6.4 `pytest.ini` (optional but recommended)
+### 6.4 `pytest.ini` (required for VSCode testing)
 ```ini
 [pytest]
 addopts = -q -ra
-testpaths = pipelines tests
+testpaths = <pipeline_name> tests
+markers =
+    integration: marks tests as integration tests (require DHIS2 instance)
 ```
 
-### 6.5 `tests/` structure
+### 6.5 `.vscode/settings.json` (required for VSCode Testing module)
+```json
+{
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestArgs": [
+        "tests",
+        "--tb=short"
+    ],
+    "python.testing.cwd": "${workspaceFolder}",
+    "python.defaultInterpreterPath": "./venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "python.analysis.extraPaths": [
+        "."
+    ],
+    "python.analysis.autoImportCompletions": true,
+    "python.testing.autoTestDiscoverOnSaveEnabled": true,
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true
+    },
+    "python.linting.enabled": true,
+    "python.linting.ruffEnabled": true,
+    "python.linting.mypyEnabled": true,
+    "python.formatting.provider": "black",
+    "python.analysis.typeCheckingMode": "basic"
+}
 ```
-pipelines/<pipeline_name>/
+
+### 6.6 `setup.py` (required for proper module discovery)
+```python
+from setuptools import find_packages, setup
+
+setup(
+    name="openhexa-dhis2-pipelines",
+    version="0.1.0",
+    description="OpenHEXA DHIS2 data pipelines",
+    packages=find_packages(),
+    python_requires=">=3.11",
+    install_requires=[
+        "openhexa.sdk>=1.0.0",
+        "openhexa-toolbox[dhis2]>=0.1.0",
+    ],
+    extras_require={
+        "dev": [
+            "pytest>=7.0.0",
+            "pytest-cov>=4.0.0", 
+            "ruff>=0.1.0",
+            "mypy>=1.0.0",
+        ]
+    },
+)
+```
+
+### 6.7 Complete project structure
+```
+<pipeline_name>/
+  __init__.py           # Required for module discovery
   pipeline.py
   README.md
   requirements.txt
@@ -136,8 +270,13 @@ tests/
   test_integration_dry_run.py
 docker/
   Dockerfile.tests
+.vscode/
+  settings.json         # VSCode Testing module configuration
 docker-compose.dhis2.yml
 .env.example
+pytest.ini             # Test configuration
+setup.py               # Module discovery and dev dependencies
+Makefile               # Convenience commands
 ```
 
 **`tests/conftest.py`**
@@ -145,7 +284,7 @@ docker-compose.dhis2.yml
 import os
 import json
 import pytest
-from openhexa_toolbox.dhis2 import DHIS2Client
+from openhexa.toolbox.dhis2 import DHIS2
 
 @pytest.fixture(scope="session")
 def dhis2_env():
@@ -157,8 +296,8 @@ def dhis2_env():
 
 @pytest.fixture(scope="session")
 def dhis2_client(dhis2_env):
-    return DHIS2Client(
-        base_url=dhis2_env["url"],
+    return DHIS2(
+        url=dhis2_env["url"],
         username=dhis2_env["user"],
         password=dhis2_env["password"],
     )
@@ -186,7 +325,7 @@ def test_mapping_has_required_sections(sample_mapping):
 
 **`tests/test_transform_unit.py`**
 ```python
-from pipelines.<pipeline_name>.pipeline import apply_mappings  # implement this helper in your code
+from <pipeline_name>.pipeline import apply_mappings  # implement this helper in your code
 
 def test_apply_mappings_transforms_values_correctly():
     value = {
@@ -209,7 +348,7 @@ def test_apply_mappings_transforms_values_correctly():
 ```python
 import os
 import pytest
-from pipelines.<pipeline_name>.pipeline import run_pipeline  # expose a function to call tasks end-to-end
+from <pipeline_name>.pipeline import run_pipeline  # expose a function to call tasks end-to-end
 
 @pytest.mark.integration
 def test_pipeline_dry_run_executes_and_reports(dhis2_client, sample_mapping, monkeypatch):
@@ -234,22 +373,55 @@ def test_pipeline_dry_run_executes_and_reports(dhis2_client, sample_mapping, mon
 
 ---
 
-## 7) Commands (developer quickstart)
+## 7) Commands (developer quickstart - Pipeline-Isolated)
+
+**IMPORTANT**: All commands are now run from within each pipeline directory.
+
+### 7.1 Docker-based Testing (Recommended for CI/CD)
 ```bash
+# Navigate to your pipeline directory
+cd pipelines/<pipeline_name>/
+
 # 1) Start DHIS2 locally (first run may take a while for DB import)
 DHIS2_IMAGE=dhis2/core:40.8.0 \
 DHIS2_DB_DUMP_URL=https://databases.dhis2.org/sierra-leone/2.40/dhis2-db-sierra-leone.sql.gz \
 docker compose -f docker-compose.dhis2.yml up -d
 
-# 2) Build test runner image
+# 2) Build test runner image  
 docker build -t ohx-tests -f docker/Dockerfile.tests .
 
 # 3) Run tests inside the container (host networking to reach DHIS2:8080)
 docker run --rm --network host --env-file .env.example -v "$PWD":/workspace ohx-tests
 
-# (optional) Run a single test file or node-id
-docker run --rm --network host --env-file .env.example -v "$PWD":/workspace ohx-tests \
-  pytest tests/test_integration_dry_run.py::test_pipeline_dry_run_executes_and_reports -q
+# Alternative: Use Makefile shortcuts (recommended)
+make up     # Start DHIS2
+make test   # Build and run tests  
+make down   # Stop DHIS2
+```
+
+### 7.2 VSCode Testing Module Setup (Recommended for Development)
+```bash
+# 1) Create Python virtual environment
+python3.11 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# 2) Install dependencies in development mode
+pip install -e ".[dev]"
+
+# 3) Start DHIS2 for integration tests (optional)
+make up
+
+# 4) VSCode will now automatically discover tests in the Testing panel
+# - Open VSCode Testing panel (Ctrl/Cmd + Shift + P -> "Test: Focus on Test Explorer View")  
+# - Tests should be automatically discovered from tests/ folder
+# - Click play button to run individual tests or test suites
+# - Integration tests will work if DHIS2 is running locally
+
+# 5) Run unit tests only (no DHIS2 required)
+pytest tests/ -k "not integration" -v
+
+# 6) Run all tests (requires DHIS2)
+pytest tests/ -v
 ```
 
 **Make targets (optional)** — add a `Makefile`:
@@ -315,25 +487,69 @@ mypy .
 
 ---
 
-## 10) Directory Layout (expected)
+## 10) Directory Layout (Pipeline-Isolated Structure)
+
+**NEW APPROACH: Each pipeline is self-contained with its own test environment**
+
+This approach allows:
+- Each data scientist to have isolated development/test environments
+- Pipeline-specific customization of Docker, Makefile, and configuration files  
+- Multiple DHIS2 pipelines in the same repo without conflicts
+- Other (non-DHIS2) pipelines to coexist with different test setups
+
 ```
-pipelines/<pipeline_name>/
-  pipeline.py
-  README.md
-  requirements.txt
-tests/
-  conftest.py
-  test_mapping_schema.py
-  test_transform_unit.py
-  test_integration_dry_run.py
-docker/
-  Dockerfile.tests
-docker-compose.dhis2.yml
-.env.example
+pipelines/<pipeline_name>/           # Each pipeline is fully self-contained
+  __init__.py                        # Package initialization  
+  pipeline.py                        # Main pipeline implementation
+  README.md                          # Pipeline-specific documentation
+  requirements.txt                   # Pipeline-specific dependencies
+  setup.py                           # Makes pipeline installable as package
+  .env.example                       # Pipeline-specific environment variables
+  pytest.ini                         # Pipeline-specific pytest configuration
+  docker-compose.dhis2.yml           # Pipeline-specific DHIS2 test environment
+  Makefile                           # Pipeline-specific make targets
+  tests/                             # Pipeline-specific test suite
+    __init__.py                      # Test package initialization
+    conftest.py                      # Test fixtures and configuration
+    test_mapping_schema.py           # Schema validation tests
+    test_transform_unit.py           # Pure unit tests  
+    test_integration_dry_run.py      # Legacy integration tests
+    test_task_*.py                   # Individual task tests
+  docker/
+    Dockerfile.tests                 # Pipeline-specific test container
+  .vscode/                           # Pipeline-specific VSCode settings
+    settings.json                    # Testing module configuration
 PRPs/
-  <feature>.md
-CLAUDE.md or prp_base.md
+  <feature>.md                       # Feature requirements
+CLAUDE.md                            # Global base rules (this file)
 ```
+
+### Working with Multiple Pipelines
+
+Each data scientist can work on their own pipeline without conflicts:
+
+```bash
+# Data Scientist A working on DHIS2 sync
+cd pipelines/sync_dhis2_to_dhis2/
+make up && make test
+
+# Data Scientist B working on IASO extraction  
+cd pipelines/extract_iaso_submissions/
+docker-compose -f docker-compose.iaso.yml up -d
+make test
+
+# Data Scientist C working on CSV transformation
+cd pipelines/transform_csv_data/ 
+pytest  # No external dependencies needed
+```
+
+### Benefits of Pipeline-Isolated Structure
+
+1. **Zero Conflicts**: Each pipeline has its own Docker environment, config files, and dependencies
+2. **Customizable**: Each pipeline can use different DHIS2 versions, test databases, or even different platforms
+3. **Scalable**: New pipelines (DHIS2, IASO, or others) can be added without affecting existing ones
+4. **Team-Friendly**: Multiple data scientists can work simultaneously without stepping on each other
+5. **CI/CD Ready**: Each pipeline can have its own CI/CD workflow and deployment strategy
 
 ---
 
@@ -341,14 +557,233 @@ CLAUDE.md or prp_base.md
 - [ ] Uses OpenHEXA decorators and toolbox helpers.
 - [ ] Mapping & payload schemas validated.
 - [ ] Dry-run path implemented and exercised.
+- [ ] **EVERY pipeline task has dedicated integration test file**.
+- [ ] **Integration tests make real API calls to local DHIS2**.
+- [ ] **Unit tests cover all transformation and validation logic**.
 - [ ] All tests green locally (Docker) and in CI.
 - [ ] `ruff` + `mypy` pass.
 - [ ] README documents parameters, mapping schema, and run commands.
+- [ ] VSCode Testing module can discover and run tests automatically.
+- [ ] Required files: `__init__.py`, `.vscode/settings.json`, `setup.py`, `pytest.ini`.
+- [ ] Test files follow naming convention: `test_task_<task_name>.py`.
 
 ---
 
-## 12) Anti-patterns
+## 12) Critical Import & API Guidelines
+
+### OpenHEXA SDK Imports (REQUIRED)
+```python
+# CORRECT imports from openhexa.sdk
+from openhexa.sdk import current_run, parameter, pipeline, DHIS2Connection
+
+# CORRECT parameter syntax - use 'help' not 'description'
+@parameter("param_name", type=str, required=True, help="Parameter description")
+
+# CORRECT DHIS2 toolbox import
+from openhexa.toolbox.dhis2 import DHIS2
+
+# CORRECT DHIS2 client initialization - use 'url' not 'base_url'
+client = DHIS2(
+    url=connection.url,
+    username=connection.username, 
+    password=connection.password
+)
+```
+
+### Common Import Errors to Avoid
+```python
+# ❌ WRONG - these will cause import errors
+from openhexa_toolbox.dhis2 import DHIS2Client  # Wrong package name & class
+from openhexa.toolbox.dhis2 import DHIS2Connection  # Wrong location
+@parameter(..., description="...")  # Wrong kwarg name
+
+# ❌ WRONG - incorrect DHIS2 client init
+client = DHIS2(base_url=url, ...)  # Wrong parameter name
+```
+
+### Required Dependencies in Dockerfile.tests
+```dockerfile
+# ESSENTIAL: Include [dhis2] extra for DHIS2 functionality
+RUN pip install --no-cache-dir \
+    openhexa.sdk openhexa-toolbox[dhis2] pytest pytest-cov ruff mypy
+
+# ESSENTIAL: Set PYTHONPATH for test imports
+ENV PYTHONPATH=/workspace
+```
+
+### Test Module Structure
+```
+# REQUIRED: Create __init__.py for Python module recognition
+<pipeline_name>/
+  __init__.py           # Must exist for imports to work
+  pipeline.py
+  
+# CORRECT: Test imports use full module path
+from <pipeline_name>.pipeline import function_name
+```
+
+---
+
+## 13) Testing Requirements (MANDATORY)
+
+### Test Coverage Requirements
+Every pipeline MUST have comprehensive test coverage that verifies:
+
+#### **Unit Tests (no external dependencies)**
+- ✅ **Mapping validation**: Schema validation, required sections, invalid JSON handling
+- ✅ **Data transformation**: Apply mappings, handle missing fields, preserve unchanged values
+- ✅ **Input validation**: Date format validation, parameter validation
+- ✅ **Edge cases**: Empty data sets, invalid inputs, boundary conditions
+
+#### **Integration Tests (requires local DHIS2)**
+- ✅ **EVERY pipeline task individually tested** against real DHIS2 instance
+- ✅ **Connection validation**: Both source and target DHIS2 connections work
+- ✅ **Data fetching**: API calls return expected data structures
+- ✅ **Error handling**: Network failures, invalid credentials, missing data
+- ✅ **End-to-end pipeline execution**: Full workflow with real DHIS2 data
+
+### Critical Testing Rules
+1. **100% Task Coverage**: Every `@task` function MUST have dedicated integration tests
+2. **Real DHIS2 API Calls**: Tests must make actual API requests to verify integration works
+3. **Error Path Testing**: Test both success and failure scenarios for each task
+4. **Data Validation**: Verify API responses have expected structure and content
+5. **No Mocking of DHIS2**: Integration tests use real local DHIS2, no mocks allowed
+
+### Required Test Files Structure (MANDATORY)
+```python
+# One test file per pipeline task + unit tests + integration tests
+tests/
+  test_task_validate_connections.py      # Real DHIS2 connection testing
+  test_task_load_mappings.py             # Real file loading + validation testing
+  test_task_fetch_updates.py             # Real DHIS2 API calls testing
+  test_task_generate_summary.py          # Real summary generation testing
+  test_pipeline_integration.py           # End-to-end pipeline execution testing
+  test_integration_dry_run.py            # Legacy integration tests  
+  test_unit_transforms.py                # Pure unit tests (no DHIS2 required)
+  test_mapping_schema.py                 # Schema validation unit tests
+  conftest.py                            # Shared fixtures with real DHIS2 client
+```
+
+### Test Execution Commands
+```bash
+# Run unit tests only (fast, no DHIS2 required)
+pytest tests/ -k "not integration" -v
+
+# Run integration tests only (requires DHIS2 server)  
+pytest tests/ -k "integration" -v
+
+# Run all tests
+pytest tests/ -v
+
+# Run specific task tests
+pytest tests/test_task_validate_connections.py -v
+pytest tests/test_task_fetch_updates.py -v
+```
+
+### Integration Test Template (per task)
+```python
+@pytest.mark.integration
+def test_<task_name>_with_real_dhis2(dhis2_client, sample_mapping):
+    """Test <task_name> function with real DHIS2 connection."""
+    # Mock current_run to provide parameters
+    class MockCurrentRun:
+        class MockConnections:
+            class MockConnection:
+                url = "http://localhost:8080"
+                username = "admin" 
+                password = "district"
+            source_connection = MockConnection()
+            target_connection = MockConnection()
+        
+        class MockParameters:
+            mapping_file = str(sample_mapping)
+            since_date = "2020-01-01"
+            dry_run = True
+        
+        connections = MockConnections()
+        parameters = MockParameters()
+        
+        @staticmethod
+        def log_info(msg): print(f"INFO: {msg}")
+        @staticmethod 
+        def log_error(msg): print(f"ERROR: {msg}")
+    
+    # Patch current_run for this test
+    import sync_dhis2_to_dhis2.pipeline as pipeline_module
+    original_current_run = pipeline_module.current_run
+    pipeline_module.current_run = MockCurrentRun()
+    
+    try:
+        # Example: Test that DHIS2 client works (use .api.get() not .get())
+        info = dhis2_client.api.get("system/info")  # CORRECT
+        assert isinstance(info, dict)
+        assert "version" in info
+        
+        # Call the actual task function
+        result = pipeline_module.<task_name>()
+        
+        # Verify result structure and content
+        assert result is not None
+        # Add specific assertions based on task's expected output
+        
+    finally:
+        # Restore original current_run
+        pipeline_module.current_run = original_current_run
+```
+
+---
+
+## 14) Troubleshooting Common Issues
+
+### Import Errors
+- **`ModuleNotFoundError: No module named 'openhexa_toolbox'`**
+  - Fix: Use `openhexa.toolbox.dhis2` not `openhexa_toolbox`
+- **`ImportError: cannot import name 'DHIS2Client'`**  
+  - Fix: Use `DHIS2` class, not `DHIS2Client`
+- **`ImportError: cannot import name 'DHIS2Connection'`**
+  - Fix: Import `DHIS2Connection` from `openhexa.sdk`, not toolbox
+- **`ModuleNotFoundError: No module named '<pipeline_name>'`**
+  - Fix: Add `ENV PYTHONPATH=/workspace` to Dockerfile.tests
+  - Fix: Create `<pipeline_name>/__init__.py` file
+
+### Parameter Decorator Errors  
+- **`TypeError: parameter() got an unexpected keyword argument 'description'`**
+  - Fix: Use `help=` instead of `description=`
+- **Parameter validation fails**
+  - Fix: Import `DHIS2Connection` from `openhexa.sdk`
+
+### DHIS2 Client Errors
+- **`DHIS2ToolboxError: Connection or url, username and password must be provided`**
+  - Fix: Use `url=` parameter, not `base_url=`
+  - Fix: Ensure all three parameters (url, username, password) are provided
+
+### Docker Build Issues
+- **DHIS2 functionality missing**
+  - Fix: Install `openhexa-toolbox[dhis2]` not just `openhexa-toolbox`
+- **Tests can't find modules**
+  - Fix: Add `ENV PYTHONPATH=/workspace` to Dockerfile
+
+### Test Framework Issues
+- **Integration tests fail to connect**
+  - Expected: Integration tests require DHIS2 server running
+  - Solution: Run unit tests only with `-k "not integration"`
+- **Test collection fails**
+  - Fix: Ensure proper module structure with `__init__.py` files
+  - Fix: Use absolute imports in tests
+- **VSCode Testing module doesn't discover tests**
+  - Fix: Ensure `.vscode/settings.json` exists with proper pytest configuration
+  - Fix: Install dependencies with `pip install -e ".[dev]"` for editable install
+  - Fix: Set Python interpreter to virtual environment in VSCode
+  - Fix: Reload VSCode window after configuration changes
+
+---
+
+## 14) Anti-patterns
 - Raw `requests` when toolbox has an equivalent.
 - Hardcoding dataset/orgUnit/period/URL/credentials.
 - Skipping validation/logging.
 - Delivering code without tests or without the Docker harness.
+- Using incorrect import paths or class names from examples.
+- Missing `[dhis2]` extra in toolbox installation.
+- Using `description=` instead of `help=` in parameter decorators.
+- **CRITICAL**: Using `dhis2_client.get()` instead of `dhis2_client.api.get()` - the DHIS2 toolbox client requires `.api.get()` for API calls.

@@ -7,6 +7,109 @@ Goal: Ship OpenHEXA pipelines for DHIS2 fast, with a **default local DHIS2 (Sier
 
 ## 0) One‑time setup
 
+### Required Local Machine Setup for Data Science Team
+
+#### Essential Software (MANDATORY)
+```bash
+# 1) Python 3.11+ (REQUIRED)
+python3.11 --version  # Must show Python 3.11.x or higher
+
+# 2) Docker Desktop (REQUIRED for DHIS2 testing)
+docker --version      # Must show Docker version 20.0+
+docker compose version # Must show Compose version 2.0+
+
+# 3) Git (REQUIRED)  
+git --version         # Must show Git 2.30+
+
+# 4) VSCode with Extensions (STRONGLY RECOMMENDED)
+# Install these VSCode Extensions:
+# - Python (ms-python.python) - REQUIRED
+# - Python Test Explorer (part of Python extension) - REQUIRED  
+# - Python Debugger (ms-python.debugpy) - REQUIRED
+# - Ruff - RECOMMENDED
+# - Docker (ms-azuretools.vscode-docker) - RECOMMENDED
+```
+
+#### Local Development Environment Setup
+```bash
+# 1) Verify Docker can run DHIS2
+docker pull dhis2/core:40.8.0
+
+# 2) Test Docker networking (critical for integration tests)  
+docker run --rm --network host alpine:latest wget -qO- http://httpbin.org/ip
+
+# 3) Clone/setup your pipeline project
+git clone <your-pipeline-repo>
+cd <pipeline-project>
+
+# 4) Create Python virtual environment
+python3.11 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# OR on Windows: venv\Scripts\activate
+
+# 5) Install pipeline in development mode
+pip install -e ".[dev]"
+```
+
+#### VSCode Testing Module Configuration (Pipeline-Isolated Approach)
+
+**IMPORTANT**: With the new pipeline-isolated structure, each pipeline has its own test environment.
+
+**Method 1: Single Pipeline Focus (Recommended)**
+```bash
+# 1) Navigate to your specific pipeline directory
+cd pipelines/<your_pipeline_name>/  # e.g., cd sync_dhis2_to_dhis2/
+
+# 2) Open ONLY the pipeline directory in VSCode (this is key!)
+code .
+
+# 3) Create and activate virtual environment within pipeline directory
+python3.11 -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# 4) Install dependencies
+pip install -e ".[dev]"
+
+# 5) Select Python interpreter (Command Palette: "Python: Select Interpreter")
+# Choose: ./venv/bin/python (relative to pipeline folder)
+
+# 6) Configure Tests (Command Palette: "Python: Configure Tests")
+# Select: pytest
+# Root directory: . (current pipeline folder)
+# Test pattern: test_*.py
+
+# 7) Open Testing Panel
+# View menu -> Open View -> Test Explorer
+# Tests in the ./tests/ folder should now be discoverable
+```
+
+**Method 3: Repository-Wide (Less Ideal)**
+```bash
+# If you must work from repository root:
+# 1) Open repository root in VSCode
+code .
+
+# 2) Update .vscode/settings.json to point to specific pipeline
+# The settings have been updated to point to sync_dhis2_to_dhis2 by default
+
+# 3) For different pipelines, manually change these settings:
+# "python.testing.pytestArgs": ["<pipeline_name>/tests", "--tb=short"]
+# "python.testing.cwd": "${workspaceFolder}/<pipeline_name>"
+```
+
+#### Environment Verification Checklist
+- [ ] **Python 3.11+** accessible via `python3.11 --version`
+- [ ] **Docker Desktop** running with 4GB+ RAM allocation  
+- [ ] **VSCode** with Python extension installed and configured
+- [ ] **Git** configured with user name and email
+- [ ] **Virtual environment** created and activated
+- [ ] **Pipeline dependencies** installed via `pip install -e ".[dev]"`  
+- [ ] **VSCode Testing panel** discovers tests automatically
+- [ ] **Docker DHIS2** starts successfully with `make up`
+- [ ] **Unit tests** pass with `pytest tests/ -k "not integration" -v`
+
+### Development Workflow Setup
+
 1) **VS Code + Claude Code**
    - Install VS Code and the Claude Code extension.
    - Sign in to Anthropic (your team key or your user key).
@@ -63,6 +166,12 @@ Here is the failing test output (paste). Fix the implementation in pipelines/<pi
 Keep public parameters stable. Update tests only if the PRP explicitly requires it.
 Re-run tests and provide a brief passing summary.
 ```
+
+Example of prompt response from Claude:
+#Insert image
+![Prompt execution (Claude)](prompt_todo_claude.png)
+Example of results summary by Claude:
+![alt text](claude_summary.png)
 
 ---
 
