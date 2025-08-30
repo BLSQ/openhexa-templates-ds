@@ -169,7 +169,7 @@ Follow the Success checklist in DHIS2_base.md. Show diffs only, no placeholders.
 
 ### Prompt B — Iterate/fix based on failing tests
 ```
-Here is the failing test output (paste). Fix the implementation in pipelines/<pipeline_name>/pipeline.py.
+Here is the failing test output (paste). Fix the implementation in <pipeline_name>/pipeline.py.
 Keep public parameters stable. Update tests only if the PRP explicitly requires it.
 Re-run tests and provide a brief passing summary.
 ```
