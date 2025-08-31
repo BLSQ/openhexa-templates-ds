@@ -17,11 +17,11 @@ This pipeline **does not perform the update itself**; it checks for freshness an
 
 ## 🧩 Parameters
 ```python
-@parameter("source_connection", type=DHIS2Connection, required=True, description="Source DHIS2 instance")
-@parameter("target_connection", type=DHIS2Connection, required=True, description="Target DHIS2 instance (to be compared, not modified)")
-@parameter("mapping_file", type=str, required=True, description=" path to JSON with dataElement and categoryOptionCombo mappings")
-@parameter("since_date", type=str, required=True, description="Date in YYYY-MM-DD format. Check if source DE values updated since this date.")
-@parameter("dry_run", type=bool, default=True, description="Always true here; no writing occurs, but required for standardization.")
+@parameter("source_connection", type=DHIS2Connection, required=True, help="Source DHIS2 instance")
+@parameter("target_connection", type=DHIS2Connection, required=True, help="Target DHIS2 instance (to be compared, not modified)")
+@parameter("mapping_file", type=str, required=True, help=" path to JSON with dataElement and categoryOptionCombo mappings")
+@parameter("since_date", type=str, required=True, help="Date in YYYY-MM-DD format. Check if source DE values updated since this date.")
+@parameter("dry_run", type=bool, default=True, help="Always true here; no writing occurs, but required for standardization.")
 ```
 
 ---
