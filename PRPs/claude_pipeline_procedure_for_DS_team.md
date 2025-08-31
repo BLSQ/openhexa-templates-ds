@@ -156,7 +156,7 @@ With `PRPs/templates/DHIS2_base.md` and the feature PRP open, start a Claude ses
 ### Prompt A — New pipeline
 ```
 Use the rules in PRPs/templates/DHIS2_base.md and the requirements in PRPs/<feature>.md.
-Create a new pipeline at pipelines/<pipeline_name>/:
+Create a new pipeline at <pipeline_name>/:
 - pipeline.py with @pipeline/@task/@parameter per DHIS2_base.md
 - README.md and requirements.txt
 Also generate the default local test harness:
