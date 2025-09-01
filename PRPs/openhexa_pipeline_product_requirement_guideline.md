@@ -25,7 +25,12 @@ This pipeline extracts **Events (program stage instances)** from a DHIS2 instanc
 - **Differs from:** The `sync_dhis2_to_dhis2` pipeline, which only checks freshness of data elements.  
 
 ---
-
+## Documentation
+**Optional - good if you use gen AI tool**
+List here all documentation that you want to be used following that format:
+ - url
+ - usecase/goal
+Please place here OpenHexa documentation, DHIS2 api documentation, openhexa toolbox specific libraries you want to use (DHIS2, IASO, Kobotoolbox, etc.) or any other available and used library or API doc.
 ## 🌐 Endpoints & Actions
 
 **Mandatory – General guideline:**  
