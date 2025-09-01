@@ -1,2 +1,6 @@
 workspace/
 workspace.yaml
+.vscode/
+config.json
+pyproject.toml
+__pycache__/
