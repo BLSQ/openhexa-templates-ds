@@ -1,0 +1,6 @@
+dataframe:
+  size: not empty
+
+columns:
+  size: 20
+  

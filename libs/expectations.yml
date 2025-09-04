@@ -1,0 +1,20 @@
+dataframe:
+  size: not empty
+  no_columns: 3
+  no_rows: 3
+
+columns:
+  age:
+    type: integer
+    minimum: 18
+    maximum: 70
+  height:
+    type: float
+    minimum: 5
+    maximum: 8
+  gender:
+    type: str
+    classes:
+      - male
+      - female
+      - other
