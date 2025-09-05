@@ -7,154 +7,214 @@ import yaml
 
 
 class TemplatesExpectations:
-    """Module to maintain data quality.
-    
-    Module that takes definition of expected output of a pipeline to run
-    check on the real pipeline output to ensure maintenance of expected data quality.
-    """
+    """A utility class for validating the quality of a dataset against a set of expectations.
+
+    This class supports:
+    - DataFrame-level checks (row count, column count, emptiness).
+    - Column-level checks (type, numeric ranges, allowed values, nullability, string length).
+    """  
 
     def __init__(self, dataset: pd.DataFrame, expectations_yml_file: str | None = None):
-        """Onset of definitions."""
+        """Initialize the TemplatesExpectations validator.
+
+        Args:
+            dataset (pd.DataFrame): The dataset to validate.
+            expectations_yml_file (str | None, optional): Path to expectations YAML file.
+                If not provided, defaults to `expectations.yml` in the caller's directory.
+
+        Raises:
+            ValueError: If `dataset` is not a pandas DataFrame or
+                if `expectations_yml_file` is not a string.
+        """
         if not isinstance(expectations_yml_file, str) and expectations_yml_file is not None:
             raise ValueError("expectations_yml_file should be a string")
-            
+
         if not isinstance(dataset, pd.DataFrame):
             raise ValueError("dataset should be a pandas dataframe")
-        
+
         if expectations_yml_file is None:
             caller_file = inspect.stack()[1].filename
             caller_dir = pathlib.Path(pathlib.Path(caller_file).resolve()).parent
             self.expectations_yml_file = f"{caller_dir}/expectations.yml"
         else:
             self.expectations_yml_file = expectations_yml_file
-        
+
         self.dataset = dataset
-        self.numeric_types = ["float64", "int64"]
+        # normalize to pandas dtypes
+        self.numeric_types = {"int64", "int32", "float64", "float32"}
+        self.string_types = {"object", "string"}
 
     def _read_definitions(self) -> dict:
-        """Read the yml file contaning definitions.
-        
+        """Load expectations definitions from the YAML file.
+
         Returns:
-            dictionary containing validation values read from expectations file
-        """ 
+            dict: Parsed expectations dictionary.
+
+        Raises:
+            FileNotFoundError: If expectations.yml does not exist.
+            ValueError: If parsing fails or required keys are missing.
+        """
         try:
-            with pathlib.Path.open(self.expectations_yml_file, encoding="utf-8") as file:
-                expectations = yaml.safe_load(file)
+            with pathlib.Path(self.expectations_yml_file).open(encoding="utf-8") as file:
+                expectations = yaml.safe_load(file) or {}
         except FileNotFoundError:
-            print("Error: 'expectations.yaml' not found.")
-            raise 
+            raise FileNotFoundError("Error: 'expectations.yml' not found.") from None
         except yaml.YAMLError as e:
-            print(f"Error parsing 'expectations.yaml' file: {e}")
-            raise
+            raise ValueError(f"Error parsing 'expectations.yml' file: {e}") from e
+
+        # basic schema guard
+        if "dataframe" not in expectations:
+            raise ValueError("expectations.yml must contain 'dataframe' section.")
+        if "columns" not in expectations:
+            raise ValueError("expectations.yml must contain 'columns' section.")
+
         return expectations
-    
+
     def validate_expectations(self):
-        """Use the list of expectations provided to run validations."""
+        """Validate the dataset against expectations defined in the YAML file.
+
+        - DataFrame-level checks:
+          * Size (empty or not empty)
+          * Number of rows
+          * Number of columns
+
+        - Column-level checks:
+          * Existence of expected columns
+          * Data type enforcement
+          * Numeric ranges (minimum, maximum)
+          * Nullability
+          * Allowed categorical values (classes)
+          * String length constraints
+
+        Raises:
+            ValueError: If expectations do not match dataset properties.
+        """        
         context = gx.get_context()
         data_source = context.data_sources.add_pandas(name="pandas")
         data_asset = data_source.add_dataframe_asset(name="pd_dataframe_asset")
-    
-        batch_definition = data_asset.add_batch_definition_whole_dataframe("batch-def")
 
+        batch_definition = data_asset.add_batch_definition_whole_dataframe("batch-def")
         batch_parameters = {"dataframe": self.dataset}
         batch = batch_definition.get_batch(batch_parameters=batch_parameters)  # noqa: F841
 
         expectations = self._read_definitions()
-        # validate dataframe length
-        if self.dataset.empty and expectations["dataframe"]["size"] == "not empty":
-            raise Exception("DataFrame is empty")
-        
-        # validate number of columns
-        if expectations["dataframe"]["no_columns"]:
-            expected_no_columns = expectations["dataframe"]["no_columns"]
-            real_no_columns = self.dataset.shape[1]
-            if real_no_columns != int(expected_no_columns):
-                err = f"""
-                    Columns missmatch:
-                    Expected number of columns is {expected_no_columns}
-                    real number of colums is {real_no_columns}"""
-                raise Exception(err)
-        
-        # validate expected number of rows
-        if expectations["dataframe"]["no_rows"]:
-            expected_no_rows = expectations["dataframe"]["no_rows"]
-            real_no_rows = self.dataset.shape[0]
-            if real_no_rows != int(expected_no_rows):
-                raise Exception(
-                    f"""
-                    Rows missmatch:
-                    Expected number of rows is {expected_no_rows}
-                    real number of rows is {real_no_rows}""")
-        # validate datatypes
-        print(self.dataset.dtypes)
-        # creating expectation suite
+
+        # ------------------------
+        # Dataframe-level checks
+        # ------------------------
+        size_expect = expectations["dataframe"].get("size")
+        if size_expect == "not empty" and self.dataset.empty:
+            raise ValueError("DataFrame is empty but expectations require non-empty.")
+        if size_expect == "empty" and not self.dataset.empty:
+            raise ValueError("DataFrame is not empty but expectations require empty.")
+
+        expected_no_columns = expectations["dataframe"].get("no_columns")
+        if expected_no_columns is not None:
+            if self.dataset.shape[1] != int(expected_no_columns):
+                raise ValueError(
+                    f"Columns mismatch: expected {expected_no_columns}, got {self.dataset.shape[1]}"
+                )
+
+        expected_no_rows = expectations["dataframe"].get("no_rows")
+        if expected_no_rows is not None:
+            if self.dataset.shape[0] != int(expected_no_rows):
+                raise ValueError(
+                    f"Rows mismatch: expected {expected_no_rows}, got {self.dataset.shape[0]}"
+                )
+
+        # ------------------------
+        # Column-level checks
+        # ------------------------
         suite = context.suites.add(
             gx.core.expectation_suite.ExpectationSuite(name="expectations_suite")
         )
-        # validate expected column schema
-        for column in expectations["columns"]:
-            column_expectation = expectations["columns"][column]
-            # validate datatype
-            if column_expectation["type"]:
+
+        for column, column_expectation in expectations["columns"].items():
+            # column presence
+            if column not in self.dataset.columns:
+                raise ValueError(f"""
+                            Column '{column}' defined in expectations.yml but missing in dataset.
+                                 """)
+
+            col_type = column_expectation.get("type")
+
+            # ------------------------
+            # datatype
+            # ------------------------
+            if col_type:
                 suite.add_expectation(
                     gx.expectations.ExpectColumnValuesToBeOfType(
                         column=column,
-                        type_=column_expectation["type"]
+                        type_=col_type
                     )
                 )
-            # validate min and max
-            print(column_expectation)
-            if column_expectation["type"] in self.numeric_types:
-                if column_expectation["maximum"] and column_expectation["minimum"]:
-                    suite.add_expectation(
-                        gx.expectations.ExpectColumnValuesToBeBetween(
-                        column=column, min_value=column_expectation["minimum"],
-                        max_value=column_expectation["maximum"]
-                    ))
-                elif column_expectation["maximum"] and not column_expectation["minimum"]:
-                    suite.add_expectation(
-                        gx.expectations.ExpectColumnValuesToBeBetween(
-                        column=column, max_value=column_expectation["maximum"]
-                    ))
-                elif column_expectation["minimum"] and not column_expectation["maximum"]:
-                    suite.add_expectation(
-                        gx.expectations.ExpectColumnValuesToBeBetween(
-                        column=column, max_value=column_expectation["minimum"]
-                    ))
-            # validating missing values
-            if column_expectation["not-null"]:
-                suite.add_expectation(gx.expectations.ExpectColumnValuesToNotBeNull(column=column))
 
-            if column_expectation["type"] in ["object"]:
-                # validate classes
-                if column_expectation["classes"]:
+            # ------------------------
+            # numeric ranges
+            # ------------------------
+            if col_type in self.numeric_types:
+                min_val = column_expectation.get("minimum")
+                max_val = column_expectation.get("maximum")
+
+                if min_val is not None or max_val is not None:
+                    suite.add_expectation(
+                        gx.expectations.ExpectColumnValuesToBeBetween(
+                            column=column,
+                            min_value=min_val,
+                            max_value=max_val,
+                        )
+                    )
+
+            # ------------------------
+            # not-null
+            # ------------------------
+            if column_expectation.get("not-null", False):
+                suite.add_expectation(
+                    gx.expectations.ExpectColumnValuesToNotBeNull(column=column)
+                )
+
+            # ------------------------
+            # string expectations
+            # ------------------------
+            if col_type in self.string_types:
+                classes = column_expectation.get("classes")
+                if classes:
                     suite.add_expectation(
                         gx.expectations.ExpectColumnDistinctValuesToBeInSet(
                             column=column,
-                            value_set=column_expectation["classes"]
+                            value_set=classes
                         )
                     )
-                # validate value length
-                if column_expectation["length-between"]:
-                    if len(column_expectation["length-between"]) == 1:
+
+                length_between = column_expectation.get("length-between")
+                if length_between:
+                    if not isinstance(length_between, (list, tuple)):
+                        raise ValueError(f"""
+                                'length-between' for column {column} must be a list or tuple.
+                                """)
+                    if len(length_between) == 1:
                         suite.add_expectation(
                             gx.expectations.ExpectColumnValueLengthsToEqual(
                                 column=column,
-                                value=column_expectation["length-between"][0]
+                                value=length_between[0]
                             )
                         )
-                    elif len(column_expectation["length-between"]) == 2:
+                    elif len(length_between) == 2:
                         suite.add_expectation(
                             gx.expectations.ExpectColumnValueLengthsToBeBetween(
                                 column=column,
-                                max_value=max(column_expectation["length-between"]),
-                                min_value=min(column_expectation["length-between"])
+                                min_value=min(length_between),
+                                max_value=max(length_between),
                             )
                         )
                     else:
-                        raise Exception("length-between should have either 1 or 2 entries.")
+                        raise ValueError(f"""
+                                    Column {column}: 'length-between' should have 1 or 2 entries.
+                                         """)
 
-        # validation definition
+        # ------------------------
+        # Validation definition
+        # ------------------------
         validation_definition = context.validation_definitions.add(
             gx.core.validation_definition.ValidationDefinition(
                 name="validation definition",
@@ -168,7 +228,6 @@ class TemplatesExpectations:
                 name="context", validation_definitions=[validation_definition]
             )
         )
-        batch_parameters = {"dataframe": self.dataset}
         checkpoint_result = checkpoint.run(batch_parameters=batch_parameters)
         print(checkpoint_result.describe())
 
