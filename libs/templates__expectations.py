@@ -29,11 +29,16 @@ class TemplatesExpectations:
             self.expectations_yml_file = expectations_yml_file
         
         self.dataset = dataset
+        self.numeric_types = ["float64", "int64"]
 
-    def _read_definitions(self):  # noqa: ANN202
-        """Read the yml file contaning definitions."""  # noqa: DOC201
+    def _read_definitions(self) -> dict:
+        """Read the yml file contaning definitions.
+        
+        Returns:
+            dictionary containing validation values read from expectations file
+        """ 
         try:
-            with open(self.expectations_yml_file) as file:  # noqa: PLW1514, PTH123
+            with pathlib.Path.open(self.expectations_yml_file, encoding="utf-8") as file:
                 expectations = yaml.safe_load(file)
         except FileNotFoundError:
             print("Error: 'expectations.yaml' not found.")
@@ -64,9 +69,11 @@ class TemplatesExpectations:
             expected_no_columns = expectations["dataframe"]["no_columns"]
             real_no_columns = self.dataset.shape[1]
             if real_no_columns != int(expected_no_columns):
-                raise Exception(
-                    f"""Expected number of columns is {expected_no_columns}
-                    real number of colums is {real_no_columns}""")
+                err = f"""
+                    Columns missmatch:
+                    Expected number of columns is {expected_no_columns}
+                    real number of colums is {real_no_columns}"""
+                raise Exception(err)
         
         # validate expected number of rows
         if expectations["dataframe"]["no_rows"]:
@@ -74,7 +81,9 @@ class TemplatesExpectations:
             real_no_rows = self.dataset.shape[0]
             if real_no_rows != int(expected_no_rows):
                 raise Exception(
-                    f"""Expected number of rows is {expected_no_rows}
+                    f"""
+                    Rows missmatch:
+                    Expected number of rows is {expected_no_rows}
                     real number of rows is {real_no_rows}""")
         # validate datatypes
         print(self.dataset.dtypes)
@@ -84,11 +93,18 @@ class TemplatesExpectations:
         )
         # validate expected column schema
         for column in expectations["columns"]:
-            # validate datatype
-
-            # validate min and max
             column_expectation = expectations["columns"][column]
-            if column_expectation["type"].lower() in ["float", "integer"]:
+            # validate datatype
+            if column_expectation["type"]:
+                suite.add_expectation(
+                    gx.expectations.ExpectColumnValuesToBeOfType(
+                        column=column,
+                        type_=column_expectation["type"]
+                    )
+                )
+            # validate min and max
+            print(column_expectation)
+            if column_expectation["type"] in self.numeric_types:
                 if column_expectation["maximum"] and column_expectation["minimum"]:
                     suite.add_expectation(
                         gx.expectations.ExpectColumnValuesToBeBetween(
@@ -105,7 +121,39 @@ class TemplatesExpectations:
                         gx.expectations.ExpectColumnValuesToBeBetween(
                         column=column, max_value=column_expectation["minimum"]
                     ))
-    
+            # validating missing values
+            if column_expectation["not-null"]:
+                suite.add_expectation(gx.expectations.ExpectColumnValuesToNotBeNull(column=column))
+
+            if column_expectation["type"] in ["object"]:
+                # validate classes
+                if column_expectation["classes"]:
+                    suite.add_expectation(
+                        gx.expectations.ExpectColumnDistinctValuesToBeInSet(
+                            column=column,
+                            value_set=column_expectation["classes"]
+                        )
+                    )
+                # validate value length
+                if column_expectation["length-between"]:
+                    if len(column_expectation["length-between"]) == 1:
+                        suite.add_expectation(
+                            gx.expectations.ExpectColumnValueLengthsToEqual(
+                                column=column,
+                                value=column_expectation["length-between"][0]
+                            )
+                        )
+                    elif len(column_expectation["length-between"]) == 2:
+                        suite.add_expectation(
+                            gx.expectations.ExpectColumnValueLengthsToBeBetween(
+                                column=column,
+                                max_value=max(column_expectation["length-between"]),
+                                min_value=min(column_expectation["length-between"])
+                            )
+                        )
+                    else:
+                        raise Exception("length-between should have either 1 or 2 entries.")
+
         # validation definition
         validation_definition = context.validation_definitions.add(
             gx.core.validation_definition.ValidationDefinition(
@@ -127,7 +175,13 @@ class TemplatesExpectations:
 
 if __name__ == "__main__":
     df = pd.DataFrame(
-        {"age": [19, 20, 30], "height": [7, 5, 6], "gender": ["male", "female", "other"]}
+        {
+            "age": [19, 20, 30],
+            "height": [7, 5, 6],
+            "gender": ["male", "female", None],
+            "phone": ["0711222333", "0722111333", "+256744123432"],
+            "shirt_size": ["s", "m", "l"],
+            }
         )
     validator = TemplatesExpectations(df)
     validator.validate_expectations()
