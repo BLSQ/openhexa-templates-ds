@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Define required files
-required_files=("pipelines.py" "README.md" "requirements.txt" "expectations.yml")
+required_files=("pipeline.py" "README.md" "requirements.txt" "expectations.yml")
 
 # Define excluded folders
 excluded_folders=("scripts" "tests" "venv")
