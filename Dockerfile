@@ -1,0 +1,56 @@
+FROM ubuntu:latest
+
+WORKDIR /app/openhexa_templates
+
+# Install required dependencies
+RUN apt-get update && apt-get install -y apt-utils
+RUN apt-get update && apt-get install -y \
+    software-properties-common \
+    build-essential \
+    curl \
+    wget \
+    libssl-dev \
+    libpq-dev \
+    libkrb5-dev \
+    libldap2-dev \
+    libsasl2-dev \
+    pkg-config \
+    libmysqlclient-dev \
+    zlib1g-dev \
+    libffi-dev \
+    libreadline-dev \
+    libsqlite3-dev \
+    libbz2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python 3.11 from source
+RUN wget https://www.python.org/ftp/python/3.11.0/Python-3.11.0.tgz && \
+    tar xvf Python-3.11.0.tgz && \
+    cd Python-3.11.0 && \
+    ./configure --enable-optimizations && \
+    make -j$(nproc) && \
+    make altinstall && \
+    cd .. && rm -rf Python-3.11.0 Python-3.11.0.tgz
+
+# COPY ./requirements-dev.txt
+COPY ./requirements.txt ./requirements.txt
+
+RUN python3.11 -m pip install --upgrade pip
+RUN python3.11 -m pip install Cython==0.29.30
+# RUN python3.12 -m pip install -r requirements-dev.txt
+
+# ENV SLUGIFY_USES_TEXT_UNIDECODE=yes
+RUN python3.11 -m pip install -r requirements.txt
+
+COPY ./ ./
+# RUN cp connection_parameters.example ../connection_parameters.py
+
+ENV PYTHONPATH "${PYTHONPATH}:/app"
+
+# Below are GSM setups not getting run for now, since we don't need them on CI
+
+# RUN apt install -y default-jre
+# COPY ./Gsm/requirements.txt ./Gsm/requirements.txt
+# COPY ./Gsm/requirements-dev.txt ./Gsm/requirements-dev.txt
+# RUN pip3 install -r ./Gsm/requirements.txt
+# RUN pip3 install -r ./Gsm/requirements-dev.txt
