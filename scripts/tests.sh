@@ -2,7 +2,7 @@
 
 # unit and feature tests written using pytest
 docker build -t templates_ci -f Dockerfile .
-docker run -it templates_ci:latest pytest 
+docker run -t templates_ci:latest pytest 
 status_of_previous_command=$?
 if [[ $status_of_previous_command -ne 0 ]]; then
     # unit tests have failed
