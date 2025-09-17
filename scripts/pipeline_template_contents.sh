@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Define required files
+# Define required files (reference names only, case-insensitive check will be done)
 required_files=("pipeline.py" "README.md" "requirements.txt")
 
 # Define excluded folders
@@ -28,11 +28,12 @@ for dir in "$repo_root"/*/; do
 
     missing=0
     for file in "${required_files[@]}"; do
-        if [[ ! -f "$dir/$file" ]]; then
+        # Use find with -iname for case-insensitive matching
+        if ! find "$dir" -maxdepth 1 -type f -iname "$file" | grep -q .; then
             echo "   ❌ Missing: $file"
             missing=1
         else
-            echo "   ✅ Found: $file"
+            echo "   ✅ Found (case-insensitive): $file"
         fi
     done
 
