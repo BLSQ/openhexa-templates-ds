@@ -1,4 +1,4 @@
-FROM dalmasbluesquarehub/templates-ci:latest
+FROM dalmasbluesquarehub/templates-ci
 
 WORKDIR /app/openhexa_templates
 
