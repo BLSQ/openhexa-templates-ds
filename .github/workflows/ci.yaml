@@ -13,4 +13,4 @@ jobs:
 
       - name: Run assets and pytest tests
         run: |
-          ./scripts/assets_tests.sh
+          ./scripts/tests.sh
