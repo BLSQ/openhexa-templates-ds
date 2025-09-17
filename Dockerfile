@@ -32,25 +32,13 @@ RUN wget https://www.python.org/ftp/python/3.11.0/Python-3.11.0.tgz && \
     make altinstall && \
     cd .. && rm -rf Python-3.11.0 Python-3.11.0.tgz
 
-# COPY ./requirements-dev.txt
+# COPY ./requirements-dev.txt ./requirements-dev.txt
 COPY ./requirements.txt ./requirements.txt
 
 RUN python3.11 -m pip install --upgrade pip
 RUN python3.11 -m pip install Cython==0.29.30
-# RUN python3.12 -m pip install -r requirements-dev.txt
-
-# ENV SLUGIFY_USES_TEXT_UNIDECODE=yes
+# RUN python3.11 -m pip install -r requirements-dev.txt
 RUN python3.11 -m pip install -r requirements.txt
 
 COPY ./ ./
-# RUN cp connection_parameters.example ../connection_parameters.py
 
-ENV PYTHONPATH "${PYTHONPATH}:/app"
-
-# Below are GSM setups not getting run for now, since we don't need them on CI
-
-# RUN apt install -y default-jre
-# COPY ./Gsm/requirements.txt ./Gsm/requirements.txt
-# COPY ./Gsm/requirements-dev.txt ./Gsm/requirements-dev.txt
-# RUN pip3 install -r ./Gsm/requirements.txt
-# RUN pip3 install -r ./Gsm/requirements-dev.txt

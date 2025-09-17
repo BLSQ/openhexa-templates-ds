@@ -1,8 +1,6 @@
 name: TEMPLATESCI
 
-on:
-  push:
-  pull_request:
+on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,4 +17,4 @@ jobs:
           pip install pytest pytest-cov
       - name: Run integration tests
         run: |
-          ./scripts/integration_tests.sh
+          ./scripts/assets_tests.sh
