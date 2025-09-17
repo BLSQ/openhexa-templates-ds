@@ -12,4 +12,5 @@ jobs:
 
       - name: Run assets and pytest tests
         run: |
+          docker pull dalmasbluesquarehub/templates-ci:latest
           ./scripts/tests.sh
