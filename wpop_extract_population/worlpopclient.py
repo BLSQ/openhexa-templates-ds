@@ -66,12 +66,16 @@ class WorldPopClient:
             base_url, fname = self._build_url(country_iso3, year, un_adj)
             destination_path = output_dir / fname
         except Exception as e:
-            raise ValueError(f"Could not determine download details for {country_iso3} {year}: {e}") from e
+            raise ValueError(
+                f"Could not determine download details for {country_iso3} {year}: {e}"
+            ) from e
 
         self._atomic_download(f"{base_url}{fname}", destination_path)
         return destination_path
 
-    def _build_url(self, country_iso3: str, year: str = "2020", un_adj: bool = False) -> tuple[str, str]:
+    def _build_url(
+        self, country_iso3: str, year: str = "2020", un_adj: bool = False
+    ) -> tuple[str, str]:
         """Build download URL.
 
         Parameters
@@ -93,7 +97,9 @@ class WorldPopClient:
             self.target_tif_filename(country_iso3, year, un_adj),
         )
 
-    def target_tif_filename(self, country_iso3: str, year: str = "2020", un_adj: bool = False) -> str:
+    def target_tif_filename(
+        self, country_iso3: str, year: str = "2020", un_adj: bool = False
+    ) -> str:
         """Get the expected target filename for a given country and year.
 
         Parameters
@@ -113,7 +119,9 @@ class WorldPopClient:
         return f"{country_iso3.lower()}_ppp_{year}{'_UNadj' if un_adj else ''}.tif"
 
     @staticmethod
-    def _atomic_download(url: str, destination_path: Path, session: requests.Session | None = None) -> None:
+    def _atomic_download(
+        url: str, destination_path: Path, session: requests.Session | None = None
+    ) -> None:
         """Downloads a file from a URL to a destination path atomically.
 
         It downloads to a temporary file first and renames it upon success,
