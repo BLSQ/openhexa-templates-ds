@@ -1,7 +1,8 @@
 on:
   push:
-    branches:
-      - main
+    # branches:
+    #   - main
+  pull_request
 jobs:
   update-docker-image:
     runs-on: ubuntu-latest
