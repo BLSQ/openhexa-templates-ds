@@ -4,11 +4,12 @@ on:
   push:
     # branches:
     #   - main
-
+  schedule:
+    - cron: '0 0 1 */2 *'
 
 jobs:
   update-docker-image:
-    if: github.ref == 'refs/heads/main'
+    # if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
