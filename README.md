@@ -1,5 +1,9 @@
 # OpenHEXA Pipeline Templates
 
+[![Base Docker CI](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/base_docker.yaml/badge.svg)](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/base_docker.yaml)
+[![Templates CI](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml/badge.svg)](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml)
+
+
 A collection of OpenHEXA pipeline templates created and maintained by Bluesquare Data Services team.
 
 
@@ -7,9 +11,6 @@ Here’s the complete **`CI_GUIDE.md`** file (Markdown) with workflow badges inc
 
 
 # ⚙️ Continuous Integration (CI) Guide
-
-[![Base Docker CI](https://github.com/dalmas-bluesquare/openhexa-templates-ds/actions/workflows/base_docker.yaml/badge.svg)](https://github.com/dalmas-bluesquare/openhexa-templates-ds/actions/workflows/base_docker.yaml)
-[![Templates CI](https://github.com/dalmas-bluesquare/openhexa-templates-ds/actions/workflows/ci.yaml/badge.svg)](https://github.com/dalmas-bluesquare/openhexa-templates-ds/actions/workflows/ci.yaml)
 
 This repository comes with **GitHub Actions CI/CD workflows** that help us automate testing.  
 If you’re new to CI, this section walks you through how things work here.
