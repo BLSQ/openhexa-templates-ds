@@ -31,4 +31,3 @@ RUN wget https://www.python.org/ftp/python/3.11.0/Python-3.11.0.tgz && \
     make -j$(nproc) && \
     make altinstall && \
     cd .. && rm -rf Python-3.11.0 Python-3.11.0.tgz
-
