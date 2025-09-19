@@ -3,8 +3,9 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import rasterio
-from openhexa.sdk import current_run, parameter, pipeline, workspace
+from openhexa.sdk import File, current_run, parameter, pipeline, workspace
 from rasterstats import zonal_stats
+from sqlalchemy import create_engine
 
 from worlpopclient import WorldPopClient
 
@@ -16,6 +17,7 @@ from worlpopclient import WorldPopClient
     help="Country ISO3 code to download population data for.",
     type=str,
     multiple=False,
+    # List of valid ISO3 codes from WorldPop (as of 2025-09)
     choices=[
         "ABW",
         "AFG",
@@ -280,10 +282,10 @@ from worlpopclient import WorldPopClient
 )
 @parameter(
     code="shapes_path",
-    name="Shape file path",
-    type=str,
-    help="Path to the shape file to use for the spatial aggregation.",
-    default=None,
+    name="Shape file",
+    type=File,
+    help="Shape file to use for the spatial aggregation. "
+    "Supported extensions: .geoJSON, .shp, .gpkg. (See geopandas.read_file()).",
     required=True,
 )
 @parameter(
@@ -305,15 +307,31 @@ from worlpopclient import WorldPopClient
 def wpop_extract_population(
     country_iso3: str,
     un_adj: bool,
-    shapes_path: str,
+    shapes_path: File,
     dst_dir: str,
     dst_table: str,
 ):
-    """Write your pipeline orchestration here."""
+    """Pipeline to extract and aggregate population data from WorldPop.
+
+    Parameters
+    ----------
+    country_iso3 : str
+        The 3-letter ISO code of the country (e.g., "COD", "BFA").
+    un_adj : bool
+        Whether to download the UN adjusted grid data.
+    shapes_path : File
+        Shape file to use for the spatial aggregation. Supported extensions: .geoJSON, .shp, .gpkg.
+        (See geopandas.read_file() for more details).
+    dst_dir : str
+        Output directory in the workspace. Parent directory will automatically be created.
+    dst_table : str
+        Output DB table name. If provided, output will be saved to a DB table.
+    """
     # set paths
     root_path = Path(workspace.files_path)
     pipeline_path = root_path / "pipelines" / "wpop_extract_population"
     year = "2020"  # Latest available data in WorldPop
+    current_run.log_debug(f"Shapes file path: {shapes_path.path}")
 
     if dst_dir is None:
         output_path = pipeline_path / "data" / "aggregated"
@@ -331,7 +349,7 @@ def wpop_extract_population(
 
         pop_agg_file_path = run_spatial_aggregation(
             tif_file_path=pop_file_path,
-            shapes_path=root_path / shapes_path,
+            shapes_path=Path(shapes_path.path),
             output_dir=output_path,
         )
 
@@ -513,10 +531,8 @@ def write_to_db(file_path: Path, table_name: str) -> None:
         raise ValueError(f"Error loading data from {file_path}: {e}") from e
 
     try:
-        df.write_database(
-            table_name=table_name,
-            connection=workspace.database_url,
-            if_table_exists="replace",
+        df.to_sql(
+            table_name, con=create_engine(workspace.database_url), if_exists="replace", index=False, chunksize=1000
         )
         current_run.log_info(f"Data written to DB table {table_name}")
     except Exception as e:
