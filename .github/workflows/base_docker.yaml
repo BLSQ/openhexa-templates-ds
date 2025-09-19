@@ -1,0 +1,22 @@
+name: BASEDOCKER
+
+on:
+  push:
+    # branches:
+    #   - main
+  schedule:
+    - cron: '0 0 1 */2 *'
+
+jobs:
+  update-docker-image:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check if Dockerfile.base changed
+        id: dockerfile-check
+        run: |
+          echo "changed=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -c 'Dockerfile.base')" >> $GITHUB_OUTPUT
+      - name: Update Base Docker Image
+        if: steps.dockerfile-check.outputs.changed != '0'
+        run: ./scripts/update_base_docker_image.sh
