@@ -2,11 +2,11 @@ name: BASEDOCKER
 
 on:
   push:
-    # branches:
-    #   - main
-#   pull_request:
-    # branches:
-    #   - main
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 jobs:
   update-docker-image:
     runs-on: ubuntu-latest
