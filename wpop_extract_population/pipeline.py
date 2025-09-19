@@ -6,7 +6,6 @@ import rasterio
 from openhexa.sdk import File, current_run, parameter, pipeline, workspace
 from rasterstats import zonal_stats
 from sqlalchemy import create_engine
-
 from worlpopclient import WorldPopClient
 
 
@@ -362,7 +361,11 @@ def wpop_extract_population(
 
 
 def retrieve_population_data(
-    country_code: str, output_path: Path, year: str = "2020", un_adj: bool = False, overwrite: bool = False
+    country_code: str,
+    output_path: Path,
+    year: str = "2020",
+    un_adj: bool = False,
+    overwrite: bool = False,
 ) -> Path:
     """Retrieve raster population data from worldpop.
 
@@ -394,7 +397,9 @@ def retrieve_population_data(
     pop_filename = wpop_client.target_tif_filename(country_code, year, un_adj)  # cleaner solution
     pop_file_path = output_path / pop_filename
     current_run.log_debug(f"target population filename: {pop_filename}")
-    current_run.log_info(f"Retrieving data for country: {country_code} - year: {year} - UN adjusted: {un_adj}")
+    current_run.log_info(
+        f"Retrieving data for country: {country_code} - year: {year} - UN adjusted: {un_adj}"
+    )
 
     try:
         if not overwrite and pop_file_path.exists():
@@ -411,7 +416,9 @@ def retrieve_population_data(
         return pop_file_path
 
     except Exception as e:
-        raise Exception(f"Error retrieving WorldPop population data for {country_code} {year}: {e}") from e
+        raise Exception(
+            f"Error retrieving WorldPop population data for {country_code} {year}: {e}"
+        ) from e
 
 
 def run_spatial_aggregation(tif_file_path: Path, shapes_path: Path, output_dir: Path) -> Path:
@@ -453,7 +460,8 @@ def run_spatial_aggregation(tif_file_path: Path, shapes_path: Path, output_dir: 
         # Reproject shapes if CRS is different
         if shapes.crs != src.crs:
             current_run.log_info(
-                f"The CRS data differs from the provided shapes file. Reprojecting shapes with {src.crs}"
+                "The CRS data differs from the provided shapes file. "
+                f"Reprojecting shapes with {src.crs}"
             )
             shapes = shapes.to_crs(src.crs)
 
@@ -489,7 +497,9 @@ def run_spatial_aggregation(tif_file_path: Path, shapes_path: Path, output_dir: 
     output_dir.mkdir(parents=True, exist_ok=True)
     result_pd.to_csv(output_dir / f"{tif_file_path.stem}.csv", index=False)
     result_pd.to_parquet(output_dir / f"{tif_file_path.stem}.parquet", index=False)
-    current_run.log_info(f"Aggregated population data saved under: {output_dir / f'{tif_file_path.stem}.csv'}")
+    current_run.log_info(
+        f"Aggregated population data saved under: {output_dir / f'{tif_file_path.stem}.csv'}"
+    )
     return output_dir / f"{tif_file_path.stem}.parquet"
 
 
@@ -532,7 +542,11 @@ def write_to_db(file_path: Path, table_name: str) -> None:
 
     try:
         df.to_sql(
-            table_name, con=create_engine(workspace.database_url), if_exists="replace", index=False, chunksize=1000
+            table_name,
+            con=create_engine(workspace.database_url),
+            if_exists="replace",
+            index=False,
+            chunksize=1000,
         )
         current_run.log_info(f"Data written to DB table {table_name}")
     except Exception as e:
