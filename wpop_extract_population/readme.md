@@ -7,13 +7,13 @@ It is intended to support population analysis for health and development project
 
 ## Parameters
 
-| Parameter      | Type  | Required | Description |
-|----------------|-------|----------|-------------|
-| `country_iso3` | str   | ✅       | 3-letter ISO code of the country (e.g., `COD`, `BFA`). Determines which WorldPop raster to download. |
-| `un_adj`       | bool  | ✅       | If `true`, downloads **UN-adjusted** WorldPop grid data. If `false`, uses the original WorldPop data. |
-| `shapes_path`  | File  | ✅       | Path to the shape file that defines the spatial aggregation units. Supported formats: `.geojson`, `.shp`, `.gpkg` (see [geopandas.read_file](https://geopandas.org/en/stable/docs/reference/api/geopandas.read_file.html)). |
-| `dst_dir`      | str   | ✅       | Output directory inside the OH workspace. Parent directory will be created if missing. |
-| `dst_table`    | str   | ✅       | Name of the output table in the database. If provided, the aggregated results will be stored in the database. |
+| Parameter          | Type  | Required | Description |
+|--------------------|-------|----------|-------------|
+| `Country ISO3 code`| str   | ✅       | 3-letter ISO code of the country (e.g., `COD`, `BFA`). Determines which WorldPop raster to download. |
+| `UN adjusted pop.` | bool  | ✅       | If `true`, downloads **UN-adjusted** WorldPop grid data. If `false`, uses the original WorldPop data. |
+| `Shape file`       | File  | ✅       | Path to the shape file that defines the spatial aggregation units. Supported formats: `.geojson`, `.shp`, `.gpkg` (see [geopandas.read_file](https://geopandas.org/en/stable/docs/reference/api/geopandas.read_file.html)). |
+| `Output directory` | str   | ❌       | Output directory inside the OH workspace. Parent directory will be created if missing. |
+| `Output DB table`  | str   | ❌       | Name of the output table in the database. If provided, the aggregated results will be stored in the database. |
 
 ---
 
@@ -27,12 +27,15 @@ It is intended to support population analysis for health and development project
    - File name depends on the country ISO code and year.
 
 2. **Aggregated Data**
-   - A CSV/Parquet file saved to the specified `dst_dir`.
-   - If `dst_dir` is **not provided**, the files are saved by default under:
+   - A CSV/Parquet file saved to the specified `Output directory`.
+   - If `Output directory` is **not provided**, the files are saved by default under:
      ```
      pipelines/wpop_extract_population/data/aggregated/
      ```
-   - If `dst_table` is provided, results are also written to a database table.
+   - If `Output DB table` is provided, results are also written to a database table.
+   - Example of aggregated data output:
+
+![Aggregated Data Example](docs/images/output_example_cod.png)
 
 ---
 
