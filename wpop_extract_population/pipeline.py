@@ -280,11 +280,11 @@ from worlpopclient import WorldPopClient
     required=False,
 )
 @parameter(
-    code="shapes_path",
-    name="Shape file",
+    code="boundaries_path",
+    name="Boundaries file",
     type=File,
-    help="Shape file to use for the spatial aggregation. "
-    "Supported extensions: .geoJSON, .shp, .gpkg. (See geopandas.read_file()).",
+    help="Boundaries file to use for the spatial aggregation. "
+    "Example extensions: .geoJSON, .gpkg. (See geopandas.read_file()).",
     required=True,
 )
 @parameter(
@@ -306,7 +306,7 @@ from worlpopclient import WorldPopClient
 def wpop_extract_population(
     country_iso3: str,
     un_adj: bool,
-    shapes_path: File,
+    boundaries_path: File,
     dst_dir: str,
     dst_table: str,
 ):
@@ -318,8 +318,8 @@ def wpop_extract_population(
         The 3-letter ISO code of the country (e.g., "COD", "BFA").
     un_adj : bool
         Whether to download the UN adjusted grid data.
-    shapes_path : File
-        Shape file to use for the spatial aggregation. Supported extensions: .geoJSON, .shp, .gpkg.
+    boundaries_path : File
+        Boundaries file to use for the spatial aggregation. Supported extensions: .geoJSON, .gpkg.
         (See geopandas.read_file() for more details).
     dst_dir : str
         Output directory in the workspace. Parent directory will automatically be created.
@@ -330,7 +330,7 @@ def wpop_extract_population(
     root_path = Path(workspace.files_path)
     pipeline_path = root_path / "pipelines" / "wpop_extract_population"
     year = "2020"  # Latest available data in WorldPop
-    current_run.log_debug(f"Shapes file path: {shapes_path.path}")
+    current_run.log_debug(f"boundaries file path: {boundaries_path.path}")
 
     if dst_dir is None:
         output_path = pipeline_path / "data" / "aggregated"
@@ -348,7 +348,7 @@ def wpop_extract_population(
 
         pop_agg_file_path = run_spatial_aggregation(
             tif_file_path=pop_file_path,
-            shapes_path=Path(shapes_path.path),
+            boundaries_path=Path(boundaries_path.path),
             output_dir=output_path,
         )
 
@@ -406,7 +406,7 @@ def retrieve_population_data(
             current_run.log_info(f"File {pop_file_path} already exists. Skipping download")
             return pop_file_path
 
-        _ = wpop_client.download_data_for_country(
+        wpop_client.download_data_for_country(
             country_iso3=country_code,
             year=year,
             un_adj=un_adj,
@@ -421,15 +421,15 @@ def retrieve_population_data(
         ) from e
 
 
-def run_spatial_aggregation(tif_file_path: Path, shapes_path: Path, output_dir: Path) -> Path:
+def run_spatial_aggregation(tif_file_path: Path, boundaries_path: Path, output_dir: Path) -> Path:
     """Run spatial aggregation on the worldpop population data (tif file).
 
     Parameters
     ----------
     tif_file_path : Path
         Path to the WorldPop population raster file (GeoTIFF).
-    shapes_path : Path
-        Path to the shape file (GeoJSON, Shapefile, etc.) for aggregation.
+    boundaries_path : Path
+        Path to the bounadires file (e.g: geojson) for aggregation.
     output_dir : Path
         Directory where the aggregated output files will be saved.
 
@@ -443,34 +443,35 @@ def run_spatial_aggregation(tif_file_path: Path, shapes_path: Path, output_dir: 
     if not tif_file_path.exists():
         raise FileNotFoundError(f"WorldPop file not found: {tif_file_path}")
 
-    if not shapes_path.exists():
-        raise FileNotFoundError(f"Shapes file not found: {shapes_path}")
+    if not boundaries_path.exists():
+        raise FileNotFoundError(f"Boundaries file not found: {boundaries_path}")
 
-    shapes = load_shapes(shapes_path)
+    boundaries = load_boundaries(boundaries_path)
 
     # Rename it to "geometry" if it's not already
-    if shapes.geometry.name.lower() != "geometry":
-        shapes = shapes.rename_geometry("geometry")
-
-    if shapes.crs is None:
-        raise ValueError("Shapes GeoDataFrame must have a defined CRS.")
+    if boundaries.geometry.name.lower() != "geometry":
+        boundaries = boundaries.rename_geometry("geometry")
 
     # Ensure CRS matches the raster & reproject if necessary
     with rasterio.open(tif_file_path) as src:
-        # Reproject shapes if CRS is different
-        if shapes.crs != src.crs:
+        if not boundaries.crs:
+            current_run.log_warning("Boundaries has no CRS defined. Assuming EPSG:4326")
+            boundaries = boundaries.set_crs("EPSG:4326")
+
+        # Reproject boundaries if CRS is different (this comparison seems safe)
+        elif boundaries.crs != src.crs:
             current_run.log_info(
-                "The CRS data differs from the provided shapes file. "
-                f"Reprojecting shapes with {src.crs}"
+                f"Boundaries CRS {boundaries.crs} differs from raster CRS {src.crs}. "
+                f"Reprojecting boundaries to {src.crs}"
             )
-            shapes = shapes.to_crs(src.crs)
+            boundaries = boundaries.to_crs(src.crs)
 
         nodata = src.nodata  # No data value
 
     # get statistics
-    current_run.log_info(f"Computing spacial aggregation for {len(shapes)} shapes")
+    current_run.log_info(f"Computing spacial aggregation for {len(boundaries)} boundaries")
     pop_stats = zonal_stats(
-        shapes,
+        boundaries,
         tif_file_path,
         stats=["sum", "count"],
         nodata=nodata,  # -99999.0
@@ -483,9 +484,8 @@ def run_spatial_aggregation(tif_file_path: Path, shapes_path: Path, output_dir: 
     result_pd = pd.DataFrame(result_gdf)
     result_pd = result_pd.rename(columns={"sum": "population", "count": "pixel_count"})
     result_pd["population"] = result_pd["population"].round(0).astype(int)
-    col_selection = [c for c in shapes.columns if c != "geometry"]
+    col_selection = [c for c in boundaries.columns if c != "geometry"]
     result_pd = result_pd[col_selection + ["population", "pixel_count"]]  # Filter columns
-    result_pd.columns = result_pd.columns.str.upper()
 
     # Log any administrative levels with no population data
     no_data = result_pd[result_pd["POPULATION"] == 0]
@@ -494,35 +494,41 @@ def run_spatial_aggregation(tif_file_path: Path, shapes_path: Path, output_dir: 
             row_str = ", ".join(f"{col}={val}" for col, val in row.items())
             current_run.log_warning(f"Row with no population data: {row_str}")
 
+    # Save outputs
     output_dir.mkdir(parents=True, exist_ok=True)
-    result_pd.to_csv(output_dir / f"{tif_file_path.stem}.csv", index=False)
-    result_pd.to_parquet(output_dir / f"{tif_file_path.stem}.parquet", index=False)
-    current_run.log_info(
-        f"Aggregated population data saved under: {output_dir / f'{tif_file_path.stem}.csv'}"
-    )
-    return output_dir / f"{tif_file_path.stem}.parquet"
+    csv_path = output_dir / f"{tif_file_path.stem}.csv"
+    parquet_path = output_dir / f"{tif_file_path.stem}.parquet"
+    result_pd.to_csv(csv_path, index=False)
+    result_pd.to_parquet(parquet_path, index=False)
+
+    # Attach outputs to the current run
+    current_run.add_file_output(csv_path.as_posix())
+    current_run.add_file_output(parquet_path.as_posix())
+
+    current_run.log_info(f"Aggregated population data saved under: {csv_path}")
+    return parquet_path
 
 
-def load_shapes(shapes_path: Path) -> gpd.GeoDataFrame:
-    """Load shapes from a file into a GeoDataFrame.
+def load_boundaries(boundaries_path: Path) -> gpd.GeoDataFrame:
+    """Load boundaries from a file into a GeoDataFrame.
 
     Parameters
     ----------
-    shapes_path : Path
-        Path to the shape file (GeoJSON, Shapefile, etc.).
+    boundaries_path : Path
+        Path to the file (GeoJSON, etc.).
 
     Returns
     -------
     gpd.GeoDataFrame
-        GeoDataFrame containing the shapes.
+        GeoDataFrame containing the boundaries.
     """
     try:
-        shapes = gpd.read_file(shapes_path)
-        if shapes.empty:
-            raise ValueError("The shapes file is empty")
-        return shapes
+        boundaries = gpd.read_file(boundaries_path)
+        if boundaries.empty:
+            raise ValueError("The boundaries file is empty")
+        return boundaries
     except Exception as e:
-        raise ValueError(f"Error loading shapes from {shapes_path}: {e}") from e
+        raise type(e)(f"Error loading {boundaries_path}: {e}") from e
 
 
 def write_to_db(file_path: Path, table_name: str) -> None:
@@ -538,7 +544,7 @@ def write_to_db(file_path: Path, table_name: str) -> None:
     try:
         df = pd.read_parquet(file_path)
     except Exception as e:
-        raise ValueError(f"Error loading data from {file_path}: {e}") from e
+        raise type(e)(f"Error loading data from {file_path}: {e}") from e
 
     try:
         df.to_sql(
@@ -550,7 +556,7 @@ def write_to_db(file_path: Path, table_name: str) -> None:
         )
         current_run.log_info(f"Data written to DB table {table_name}")
     except Exception as e:
-        raise ValueError(f"Error writing data to DB table {table_name}: {e}") from e
+        raise type(e)(f"Error writing data to DB table {table_name}: {e}") from e
 
 
 if __name__ == "__main__":
