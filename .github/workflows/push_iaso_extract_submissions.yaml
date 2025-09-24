@@ -1,12 +1,12 @@
-name: Push extract-orgunits pipeline to OpenHEXA Workspace
+name: Push extract-submissions pipeline to OpenHEXA Workspace
 
 on:
   push:
     paths:
-      - ".github/workflows/push_iaso_extract_orgunits.yml"
-      - "iaso_extract_orgunits/**"
-      - "!iaso_extract_orgunits/docs/**"
-      - "!iaso_extract_orgunits/docs/README.md"
+      - ".github/workflows/push_iaso_extract_submissions.yml"
+      - "iaso_extract_submissions/**"
+      - "!iaso_extract_submissions/docs/**"
+      - "!iaso_extract_submissions/docs/README.md"
     branches:
       - main
 
@@ -30,8 +30,8 @@ jobs:
           
       - name: Push pipeline to OpenHEXA
         run: |
-          openhexa pipelines push iaso_extract_orgunits \
-            --code "iaso-extract-orgunits" \
+          openhexa pipelines push iaso_extract_submissions \
+            --code "iaso-extract-submissions" \
             --description "${{ github.event.head_commit.message }}" \
             --link "https://github.com/BLSQ/openhexa-templates-ds/commit/${{ github.sha }}" \
             --yes
