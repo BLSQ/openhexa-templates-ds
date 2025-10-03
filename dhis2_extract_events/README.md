@@ -45,6 +45,7 @@ The output includes a list of events with:
 - When it occurred.
 - The program id and name; the program stage and name.
 - The enrrollement id and the tracked entity type id.
+(Note that, depending on the kind of program we are dealing with, these fields might be empty.)
 - The data elements (ids and names) and their corresponding value associated to each event.
 
 | event_id    | status    | deleted   | occurred_at         | program_id   | program_name         | program_stage_id   | program_stage_name      | enrollment_id   | tracked_entity_id   | data_element_id   | data_element_name               | value           | organisation_unit_id   | attribute_option_combo_id   | level_1_id   | level_1_name   | level_2_id   | level_2_name   | level_3_id   | level_3_name   | level_4_id   | level_4_name   | level_5_id   | level_5_name   | level_6_id   | level_6_name   |
