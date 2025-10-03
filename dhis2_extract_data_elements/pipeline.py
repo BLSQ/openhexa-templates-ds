@@ -366,15 +366,17 @@ def validate_data(df: pl.DataFrame) -> None:
         # validating data types
         if str(df.schema[col_name]) != col_type:
             error_messages.append(
-                f"Type of column {col_name} is {df.schema[col_name]} and does not match expected type: {col_type}"
+                f"Type of column {col_name} is {df.schema[col_name]} and"
+                f"does not match expected type: {col_type}"
             )
         # validating emptiness of a column
         if col["not null"]:
             df_empty_or_null_cololumn = df.select(
-                (pl.col(col_name).is_null()) | (pl.col(col_name) == "")
+                (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
             )
             if df_empty_or_null_cololumn.height > 0:
-                error_messages.append(f"Column {col_name} has missing values. It is not expected have any value missing")
+                error_messages.append(f"Column {col_name} has missing values."
+                                      "It is not expected have any value missing")
 
     if len(error_messages) > 1:
         raise RuntimeError("\n".join(error_messages))
