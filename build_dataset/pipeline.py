@@ -110,6 +110,9 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
 
             output_filename = f"{data_element_folder}.csv"
             output_path = f"{workspace.files_path}/{dataset_path_str}/{output_filename}"
+            # data validations at the end of the pipeline
+            validate_data(concatenated_df)
+
             concatenated_df.to_csv(output_path, index=False)
             version.add_file(source=output_path, filename=output_filename)
             current_run.log_info(f"Added file: {output_filename} to dataset version")
@@ -118,6 +121,24 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
                 continue
 
     # Upload to dataset version using DatasetVersion.add_file
+
+
+def validate_data(df: pd.DataFrame) -> None:
+    """Validate that the provided DataFrame and its data.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        The DataFrame to validate.
+
+    Raises
+    ------
+    RuntimeError
+        If the DataFrame has zero rows.
+    """
+    # validate for none emptiness
+    if df.shape[0] == 0:
+        raise RuntimeError("The output dataset is empty")
 
 
 def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:

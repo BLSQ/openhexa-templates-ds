@@ -211,12 +211,16 @@ def dhis2_extract_data_elements(
     current_run.log_info("Joining object names to output data")
     data_values = join_object_names(
         df=data_values,
-        data_elements=src_data_elements if "data_element_id" in data_values.columns else None,
+        data_elements=(
+            src_data_elements if "data_element_id" in data_values.columns else None
+        ),
         indicators=src_indicators if "indicator_id" in data_values.columns else None,
         organisation_units=src_organisation_units,
-        category_option_combos=src_category_option_combos
-        if "category_option_combo_id" in data_values.columns
-        else None,
+        category_option_combos=(
+            src_category_option_combos
+            if "category_option_combo_id" in data_values.columns
+            else None
+        ),
     )
     current_run.log_info("Sucessfully joined object names to output data")
 
@@ -226,6 +230,7 @@ def dhis2_extract_data_elements(
     else:
         dst_file = default_output_path()
 
+    validate_data(data_values)
     current_run.log_info(f"Writing data to {dst_file}")
     data_values.write_parquet(dst_file)
     current_run.add_file_output(dst_file.as_posix())
@@ -236,6 +241,134 @@ def dhis2_extract_data_elements(
 
     if dst_table:
         write_to_db(df=data_values, table_name=dst_table)
+
+
+def validate_data(df: pl.DataFrame) -> None:
+    """Validate the contents of a Polars DataFrame against predefined schema rules.
+
+    This function performs the following validations:
+    1. Ensures the DataFrame is not empty.
+    2. Confirms that only expected columns are present in the DataFrame.
+    3. Checks that each expected column has the correct data type.
+    4. Verifies that columns marked as `not null` do not contain null or empty values.
+
+    If any validation fails, a `RuntimeError` is raised with one or more descriptive 
+    error messages indicating the issue(s).
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The Polars DataFrame to be validated.
+
+    Raises
+    ------
+    RuntimeError
+        If the DataFrame is empty, contains unexpected columns, has incorrect data types,
+        or has missing values in columns that should not be null.
+    """
+    # validating none emptiness
+    error_messages = ["\n"]
+    if df.height == 0:
+        error_messages.append("data_values is empty")
+
+    expected_columns = [
+        {
+            "name": "indicator_id",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "indicator_name",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "organisation_unit_id",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "period",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "value",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "level_1_id",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "level_2_id",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "level_3_id",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "level_4_id",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "level_1_name",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "level_2_name",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "level_3_name",
+            "type": "String",
+            "not null": False,
+        },
+        {
+            "name": "level_4_name",
+            "type": "String",
+            "not null": False,
+        },
+    ]
+
+    # checking for unvalidated columns
+    expected_column_names = [col["name"] for col in expected_columns]
+    unvalidated_columns = [
+        col for col in df.columns if col not in expected_column_names
+    ]
+    if len(unvalidated_columns) > 0:
+        error_messages.append(
+            f"Data in column(s) {unvalidated_columns} is(are) not validated"
+        )
+
+    for col in expected_columns:
+        col_name = col["name"]
+        col_type = col["type"]
+        # validating data types
+        if str(df.schema[col_name]) != col_type:
+            error_messages.append(
+                f"Type of column {col_name} is {df.schema[col_name]} and "
+                f"does not match expected type: {col_type}"
+            )
+        # validating emptiness of a column
+        if col["not null"]:
+            df_empty_or_null_cololumn = df.select(
+                (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
+            )
+            if df_empty_or_null_cololumn.height > 0:
+                error_messages.append(f"Column {col_name} has missing values."
+                                      "It is not expected have any value missing")
+
+    if len(error_messages) > 1:
+        raise RuntimeError("\n".join(error_messages))
 
 
 def default_output_path() -> Path:
@@ -311,7 +444,9 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     """
     if dataset.latest_version is not None:
         if in_dataset_version(file=fp, dataset_version=dataset.latest_version):
-            current_run.log_info("File is already in the dataset and no changes have been detected")
+            current_run.log_info(
+                "File is already in the dataset and no changes have been detected"
+            )
             return
 
     # increment dataset version name and create the new dataset version
@@ -323,7 +458,9 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     dataset_version = dataset.create_version(name=f"v{version_number}")
 
     dataset_version.add_file(fp, "data_values.parquet")
-    current_run.log_info(f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}")
+    current_run.log_info(
+        f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}"
+    )
 
 
 def md5_from_url(url: str) -> str:
