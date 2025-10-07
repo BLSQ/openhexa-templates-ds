@@ -11,4 +11,3 @@ jobs:
         run: |
           docker pull blsq/openhexa-blsq-environment:latest
           ./scripts/tests.sh
-
