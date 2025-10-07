@@ -16,10 +16,12 @@ jobs:
       - name: List coverage files
         run: |
           echo "Checking if coverage files exist..."
-          ls -l ./pytest-coverage.txt ./pytest.xml || echo "⚠️ Files not found"
+          ls
+          echo "end of ls"
+          ls -l pytest-coverage.txt pytest.xml || echo "⚠️ Files not found"
 
       - name: Pytest coverage comment
         uses: MishaKav/pytest-coverage-comment@main
         with:
-          pytest-coverage-path: ./pytest-coverage.txt
-          junitxml-path: ./pytest.xml
+          pytest-coverage-path: pytest-coverage.txt
+          junitxml-path: pytest.xml
