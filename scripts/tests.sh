@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
+set -e
 
 # Run tests inside Docker, mounting the current directory
 docker run --rm -t \
   -v "$(pwd)":/app \
   -w /app \
   blsq/openhexa-blsq-environment:latest \
-  pytest --cov --cov-report json
+  pytest --cov --cov-report=json:coverage.json
 
 status_of_previous_command=$?
 if [[ $status_of_previous_command -ne 0 ]]; then
