@@ -2,6 +2,8 @@
 # OpenHEXA Pipeline Templates
 
 [![Templates CI](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml/badge.svg)](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml)
+[![Coverage](https://img.shields.io/endpoint?url=https://openhexa-templates-ds.blob.core.windows.net/coverage/coverage-badge.json)](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml)
+
 
 A collection of **OpenHEXA pipeline templates** created and maintained by the Bluesquare Data Services team.
 
