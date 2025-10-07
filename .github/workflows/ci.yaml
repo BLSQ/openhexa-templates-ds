@@ -12,5 +12,5 @@ jobs:
 
       - name: Run assets and pytest tests
         run: |
-          docker pull dalmasbluesquarehub/templates-ci:latest
+          docker pull blsq/openhexa-blsq-environment:latest
           ./scripts/tests.sh
