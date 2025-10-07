@@ -13,6 +13,8 @@ jobs:
         run: |
           docker pull blsq/openhexa-blsq-environment:latest
           ./scripts/tests.sh
+          ls
+          pwd
 
       # Save coverage artifacts so next steps can read them
       - name: Upload coverage artifact
