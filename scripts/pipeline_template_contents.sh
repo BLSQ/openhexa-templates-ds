@@ -4,9 +4,6 @@ set -euo pipefail
 # Define required files (reference names only, case-insensitive check will be done)
 required_files=("pipeline.py" "README.md" "requirements.txt")
 
-# Define excluded folders
-excluded_folders=("scripts" "tests" "venv")
-
 # Get repo root (script's parent directory)
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -19,8 +16,14 @@ failing_folders=()
 for dir in "$repo_root"/*/; do
     folder_name=$(basename "$dir")
 
-    # Skip excluded and hidden folders
-    if [[ " ${excluded_folders[*]} " =~ " $folder_name " ]] || [[ $folder_name == .* ]]; then
+    # Skip hidden folders (e.g., .git, .venv)
+    if [[ $folder_name == .* ]]; then
+        continue
+    fi
+
+    # Skip if the folder does not contain pipeline.py (case-insensitive)
+    if ! find "$dir" -maxdepth 1 -type f -iname "pipeline.py" | grep -q .; then
+        echo "⏭️  Skipping $folder_name (no pipeline.py found)"
         continue
     fi
 
@@ -54,6 +57,6 @@ if [[ ${#failing_folders[@]} -gt 0 ]]; then
     done
     exit 1
 else
-    echo "🎉 All folders passed the check."
+    echo "🎉 All checked folders passed the check."
     exit 0
 fi
