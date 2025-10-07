@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Define paths for report outputs
-COVERAGE_FILE="pytest-coverage.txt"
-JUNIT_FILE="pytest.xml"
+HOST_DIR="$(pwd)"
+COVERAGE_FILE="$HOST_DIR/pytest-coverage.txt"
+JUNIT_FILE="$HOST_DIR/pytest.xml"
 
 # Run tests inside Docker, mounting the current directory
 docker run --rm -t \
