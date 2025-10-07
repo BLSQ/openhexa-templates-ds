@@ -11,6 +11,13 @@ jobs:
         run: |
           docker pull blsq/openhexa-blsq-environment:latest
           ./scripts/tests.sh
+
+
+      - name: List coverage files
+        run: |
+          echo "Checking if coverage files exist..."
+          ls -l ./pytest-coverage.txt ./pytest.xml || echo "⚠️ Files not found"
+
       - name: Pytest coverage comment
         uses: MishaKav/pytest-coverage-comment@main
         with:
