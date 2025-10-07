@@ -1,101 +1,100 @@
 # OpenHEXA Pipeline Templates
 
-[![Base Docker CI](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/base_docker.yaml/badge.svg)](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/base_docker.yaml)
 [![Templates CI](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml/badge.svg)](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml)
 
-
-A collection of OpenHEXA pipeline templates created and maintained by Bluesquare Data Services team.
-
-
-Here’s the complete **`CI_GUIDE.md`** file (Markdown) with workflow badges included. You can link to this file from your `README.md` or merge it directly into your README.
-
-
-# ⚙️ Continuous Integration (CI) Guide
-
-This repository comes with **GitHub Actions CI/CD workflows** that help us automate testing.  
-If you’re new to CI, this section walks you through how things work here.
+A collection of **OpenHEXA pipeline templates** created and maintained by the Bluesquare Data Services team.
 
 ---
 
-## 1. Workflows Overview
+## Continuous Integration (CI)
 
-We have two workflows inside [`.github/workflows/`](.github/workflows/):
+This repository uses **GitHub Actions** to ensure that all pipeline templates are valid and pass automated tests.
 
-### 🐳 `base_docker.yaml`
-- **When it runs**: On every push to the `main` branch.  
-- **What it does**:
-  1. Checks if the file [`Dockerfile.base`](./Dockerfile.base) was modified in the push.
-  2. If yes:
-     - Logs in to Docker Hub using repository secrets:
-       - `DOCKERHUB_USERNAME`
-       - `DOCKERHUB_PASSWORD` (or personal access token).
-     - Runs [`scripts/update_base_docker_image.sh`](./scripts/update_base_docker_image.sh)  
-       which builds and pushes the base CI Docker image to Docker Hub (`dalmasbluesquarehub/templates-ci:latest`).
+### Workflow: `ci.yaml`
 
-👉 The **base image** (`Dockerfile.base`) is meant for dependencies that **rarely change** (Python version, system libs, etc.).
+**File:** [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml)  
+**Runs on:** every **push** and **pull request**  
 
----
+#### What it does
+1. Checks out the repository.
+2. Sets up **Python 3.11**.
+3. Pulls the latest OpenHEXA base environment:  
+  ```bash
+   docker pull blsq/openhexa-blsq-environment:latest
+  ```
+4. Runs the test suite via [`scripts/tests.sh`](./scripts/tests.sh).
 
-### ✅ `ci.yaml`
-- **When it runs**: On every push or pull request.  
-- **What it does**:
-  1. Pulls the latest base image from Docker Hub (`dalmasbluesquarehub/templates-ci:latest`).
-  2. Runs [`scripts/tests.sh`](./scripts/tests.sh) which:
-     - Builds a test image using the repo’s [`Dockerfile`](./Dockerfile).
-     - Runs **pytest** for unit and feature tests.
-     - Verifies that required files (`pipeline.py`, `README.md`, `requirements.txt`) exist in all top-level project folders (see [`scripts/pipeline_template_contents.sh`](./scripts/pipeline_template_contents.sh)).
 
-👉 This ensures that any change to templates or code is automatically tested.
+## Test Process
 
----
+### `scripts/tests.sh`
 
-## 2. Dockerfiles in the Repo
+This script performs two key validation steps:
 
-- **[`Dockerfile.base`](./Dockerfile.base)**  
-  Defines the **base CI image** with Python 3.11 and system libraries.  
-  Gets built and pushed to Docker Hub only if this file changes.
+1. **Unit & Feature Tests**
+   Runs `pytest` inside the OpenHEXA Docker environment to ensure all tests pass.
 
-- **[`Dockerfile`](./Dockerfile)**  
-  Defines the **project test image** built on top of the base image.  
-  Includes Python requirements and project code.  
-  Used during test runs.
+   ```bash
+   docker run -t blsq/openhexa-blsq-environment:latest pytest
+   ```
 
----
+2. **Template Structure Validation**
+   Runs [`scripts/pipeline_template_contents.sh`](./scripts/pipeline_template_contents.sh), which verifies that each valid pipeline folder contains the required files:
 
-## 3. Secrets Setup (required for Docker pushes)
+   * `pipeline.py`
+   * `README.md`
+   * `requirements.txt`
 
-For the workflow to push to Docker Hub, add these secrets in your repo:
+   Folders without a `pipeline.py` file are skipped automatically.
 
-1. Go to **Settings → Secrets and variables → Actions**.  
-2. Add:
-   - `DOCKERHUB_USERNAME` → your Docker Hub username  
-   - `DOCKERHUB_PASSWORD` → your Docker Hub password or [Docker Hub Personal Access Token](https://docs.docker.com/security/for-developers/access-tokens/)
+If any tests or structure checks fail, the workflow exits with a non-zero status, marking the CI run as failed.
 
----
 
-## 4. Local Testing (optional)
+## Repository Structure
 
-You can run the same scripts locally before pushing:
+Typical layout:
+
+```
+openhexa-templates-ds/
+├── template_a/
+│   ├── pipeline.py
+│   ├── requirements.txt
+│   └── README.md
+├── template_b/
+│   ├── pipeline.py
+│   ├── requirements.txt
+│   └── README.md
+├── scripts/
+│   ├── tests.sh
+│   └── pipeline_template_contents.sh
+└── .github/
+    └── workflows/
+        └── ci.yaml
+```
+
+
+## Local Testing
+
+You can run the same checks locally before pushing:
 
 ```bash
-# Run the test pipeline locally
+# Run the same validations as the CI
 ./scripts/tests.sh
+```
 
-# Update and push base Docker image (requires Docker login)
-./scripts/update_base_docker_image.sh
-````
 
----
+## CI Summary
 
-## 5. CI Flow Summary
+| Step                      | Description                                       |
+| ------------------------- | ------------------------------------------------- |
+| **Build**              | Sets up Python and pulls the OpenHEXA environment |
+| **Run Tests**          | Executes pytest inside Docker                     |
+| **Validate Templates** | Ensures all required files exist per pipeline     |
 
-1. **Change application code** → `ci.yaml` runs tests ✅
-2. **Change `Dockerfile.base`** → `base_docker.yaml` rebuilds and pushes base image 🐳
-
-This setup makes sure:
-
-* Tests run automatically on every push/PR.
-* The base Docker image is only rebuilt when needed.
+All these steps run automatically on every push or pull request to maintain template quality and consistency.
 
 ---
 
+**Maintained by:** Bluesquare Data Services Team
+
+**Environment:** [`blsq/openhexa-blsq-environment:latest`](https://hub.docker.com/r/blsq/openhexa-blsq-environment)
