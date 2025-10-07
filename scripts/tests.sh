@@ -15,3 +15,6 @@ if [[ $status_of_previous_command -ne 0 ]]; then
     # unit tests have failed
     exit 1
 fi
+
+# Generate Coverage Report
+docker run -t blsq/openhexa-blsq-environment:latest coverage report -m
