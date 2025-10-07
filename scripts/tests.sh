@@ -4,7 +4,6 @@ set -euo pipefail
 # Run tests inside Docker, mounting both source and output dirs
 docker run --rm -t \
   -v "$(pwd)":/app \
-  -v "$(pwd)/coverage_output":/coverage_output \
   -w /app \
   blsq/openhexa-blsq-environment:latest pytest
 
