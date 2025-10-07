@@ -5,37 +5,10 @@ on: [push, pull_request]
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Run assets and pytest tests
         run: |
           docker pull blsq/openhexa-blsq-environment:latest
           ./scripts/tests.sh
-          ls
-          pwd
-          ls coverage_output
 
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: /home/runner/work/openhexa-templates-ds/openhexa-templates-ds/coverage_output/coverage.json
-
-      - name: Generate Coverage Badge
-        uses: MishaKav/pytest-coverage-comment@main
-        with:
-          pytest-coverage-path: /home/runner/work/openhexa-templates-ds/openhexa-templates-ds/coverage_output/coverage.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          badge-title: Coverage
-          output: ./badges/${{ github.ref_name }}/coverage.svg
-
-      - name: Deploy badge to GitHub Pages
-        if: always()
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./badges
-          destination_dir: badges
