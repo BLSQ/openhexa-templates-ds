@@ -15,7 +15,7 @@ jobs:
           ./scripts/tests.sh
           ls
           pwd
-          ls coverage-report
+          ls coverage_output
 
       - name: Upload coverage artifact
         if: always()
