@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,14 @@ from openhexa.toolbox.dhis2.dataframe import (
     get_datasets,
     get_organisation_unit_groups,
     get_organisation_units,
+)
+from validation_config import (
+    org_unit_groups_expected_columns,
+    org_units_expected_columns,
+    retrieved_categorty_options_expected_columns,
+    retrieved_data_element_groups_expected_columns,
+    retrieved_data_elements_expected_columns,
+    retrieved_datasets_expected_columns,
 )
 
 
@@ -136,6 +145,96 @@ def dhis2_metadata_extract(
         raise
 
 
+def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> None:
+    """Validate the contents of a Polars DataFrame against predefined schema rules.
+
+    This function performs the following validations:
+    1. Ensures the DataFrame is not empty.
+    2. Confirms that only expected columns are present in the DataFrame.
+    3. Checks that each expected column has the correct data type.
+    4. Verifies that columns marked as `not null` do not contain null or empty values.
+
+    If any validation fails, a `RuntimeError` is raised with one or more descriptive 
+    error messages indicating the issue(s).
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The Polars DataFrame to be validated.
+    expected_columns : dict
+        Columns together with their expected configurations
+    data_name: str
+        name of the dataset we 
+
+    Raises
+    ------
+    RuntimeError
+        If the DataFrame is empty, contains unexpected columns, has incorrect data types,
+        or has missing values in columns that should not be null.
+    """
+    current_run.log_info(f"Validating data in {data_name}")
+    validation_start_time = time.time()
+    # with pl.Config(fmt_str_lengths=1000, tbl_width_chars=250) as cfg:
+    #     cfg.set_tbl_cols(df.width)
+    #     print(df)
+    # validating none emptiness
+    error_messages = ["\n"]
+    if df.height == 0:
+        error_messages.append("data_values is empty")
+
+    # checking for unvalidated columns
+    expected_column_names = [col["name"] for col in expected_columns]
+    unvalidated_columns = [
+        col for col in df.columns if col not in expected_column_names
+    ]
+    if len(unvalidated_columns) > 0:
+        error_messages.append(
+            f"Data in column(s) {unvalidated_columns} is(are) not validated"
+        )
+    for col in expected_columns:
+        col_name = col["name"]
+        col_type = col["type"]
+        # validating data types
+        if str(df.schema[col_name]) != col_type:
+            error_messages.append(
+                f"Type of column {col_name} is {df.schema[col_name]} and"
+                f"does not match expected type: {col_type}"
+            )
+        # validating emptiness of a column
+        if col["not null"]:
+            df_empty_or_null_cololumn = df.filter(
+                (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
+            )
+            if df_empty_or_null_cololumn.height > 0:
+                error_messages.append(f"Column {col_name} has missing values."
+                                      "It is not expected have any value missing")
+
+        # validating number of characters
+        char_num = col.get("number of characters")
+        if char_num:
+            df_with_char_count = df.filter(
+                pl.col(col_name).str.len_chars().alias("char_count") > char_num
+                )
+            if df_with_char_count.height > 0:
+                raise RuntimeError(f"Found values exceeding {char_num} characters:\n{col_name}")
+
+        # validating column values to be
+        # able to converted to integers
+        int_conversion = col.get("can be converted to integer")
+        if int_conversion:
+            try:
+                df.with_columns(pl.col(col_name).cast(pl.Int64))
+            except Exception as e:
+                raise RuntimeError(f"Column {col_name} cannot be converted to integer: {e}")  # noqa: B904
+
+    if len(error_messages) > 1:
+        raise RuntimeError("\n".join(error_messages))
+    
+    validation_end_time = time.time()
+    duration = validation_end_time - validation_start_time
+    current_run.log_info(f"Validation of {data_name} took {duration:.2f} seconds.")
+
+
 def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
     """Get the DHIS2 connection.
 
@@ -182,6 +281,7 @@ def retrieve_org_units(
             org_units = org_units.filter(pl.col("level") == max_level).drop(
                 ["id", "name", "level", "opening_date", "closed_date", "geometry"]
             )
+            validate_data(org_units, org_units_expected_columns, data_name="org_units")
             filename = f"org_units_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=org_units, output_path=output_path, filename=filename)
         except Exception as e:
@@ -217,6 +317,12 @@ def retrieve_org_unit_groups(
             org_unit_groups = org_unit_groups.with_columns(
                 [pl.col("organisation_units").list.join(",").alias("organisation_units")]
             )
+
+            validate_data(
+                org_unit_groups,
+                org_unit_groups_expected_columns,
+                data_name="org_unit_groups"
+                )
             filename = f"org_units_groups_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=org_unit_groups, output_path=output_path, filename=filename)
         except Exception as e:
@@ -256,6 +362,12 @@ def retrieve_datasets(
                     pl.col("indicators").list.join(",").alias("indicators"),
                 ]
             )
+
+            validate_data(
+                datasets,
+                retrieved_datasets_expected_columns,
+                data_name="datasets"
+                )
             filename = f"datasets_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=datasets, output_path=output_path, filename=filename)
         except Exception as e:
@@ -285,6 +397,12 @@ def retrieve_data_elements(dhis2_client: DHIS2, output_path: Path, run: bool = T
         try:
             data_elements = get_data_elements(dhis2_client)
             filename = f"data_elements_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
+            print(data_elements)
+            validate_data(
+                data_elements,
+                retrieved_data_elements_expected_columns,
+                data_name="data_elements"
+                )
             save_file(df=data_elements, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving data elements: {e}") from e
@@ -315,6 +433,12 @@ def retrieve_data_element_groups(dhis2_client: DHIS2, output_path: Path, run: bo
             data_element_groups = data_element_groups.with_columns(
                 [pl.col("data_elements").list.join(",").alias("data_elements")]
             )
+
+            validate_data(
+                data_element_groups,
+                retrieved_data_element_groups_expected_columns,
+                data_name="data_element_groups"
+                )
             filename = f"data_element_groups_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=data_element_groups, output_path=output_path, filename=filename)
         except Exception as e:
@@ -345,6 +469,12 @@ def retrieve_category_option_combos(
         current_run.log_info("Retrieving category option combos")
         try:
             categorty_options = get_category_option_combos(dhis2_client)
+
+            validate_data(
+                categorty_options,
+                retrieved_categorty_options_expected_columns,
+                data_name="categorty_options"
+                )
             filename = f"category_option_combos_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=categorty_options, output_path=output_path, filename=filename)
         except Exception as e:
