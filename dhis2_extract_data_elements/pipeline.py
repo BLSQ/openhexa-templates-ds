@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     get_organisation_units,
     join_object_names,
 )
+from validation_config import expected_columns
 
 
 @pipeline("dhis2-extract-data-elements")
@@ -252,103 +254,15 @@ def validate_data(df: pl.DataFrame) -> None:
         If the DataFrame is empty, contains unexpected columns, has incorrect data types,
         or has missing values in columns that should not be null.
     """
+    current_run.log_info("Validating data")
+    validation_start_time = time.time()
+    # with pl.Config(fmt_str_lengths=1000, tbl_width_chars=250) as cfg:
+    #     cfg.set_tbl_cols(df.width)
+    #     print(df)
     # validating none emptiness
     error_messages = ["\n"]
     if df.height == 0:
         error_messages.append("data_values is empty")
-
-    expected_columns = [
-        {
-            "name": "data_element_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "data_element_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "organisation_unit_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "category_option_combo_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "attribute_option_combo_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "category_option_combo_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "period",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "value",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_1_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_2_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_3_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_4_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_1_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_2_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_3_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_4_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "created",
-            "type": "Datetime(time_unit='ms', time_zone='UTC')",
-            "not null": False,
-        },
-        {
-            "name": "last_updated",
-            "type": "Datetime(time_unit='ms', time_zone='UTC')",
-            "not null": False,
-        },
-    ]
 
     # checking for unvalidated columns
     expected_column_names = [col["name"] for col in expected_columns]
@@ -359,7 +273,6 @@ def validate_data(df: pl.DataFrame) -> None:
         error_messages.append(
             f"Data in column(s) {unvalidated_columns} is(are) not validated"
         )
-
     for col in expected_columns:
         col_name = col["name"]
         col_type = col["type"]
@@ -371,15 +284,37 @@ def validate_data(df: pl.DataFrame) -> None:
             )
         # validating emptiness of a column
         if col["not null"]:
-            df_empty_or_null_cololumn = df.select(
+            df_empty_or_null_cololumn = df.filter(
                 (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
             )
             if df_empty_or_null_cololumn.height > 0:
                 error_messages.append(f"Column {col_name} has missing values."
                                       "It is not expected have any value missing")
 
+        # validating number of characters
+        char_num = col.get("number of characters")
+        if char_num:
+            df_with_char_count = df.filter(
+                pl.col(col_name).str.len_chars().alias("char_count") > char_num
+                )
+            if df_with_char_count.height > 0:
+                raise RuntimeError(f"Found values exceeding {char_num} characters:\n{col_name}")
+
+        # validating column values to be
+        # able to converted to integers
+        int_conversion = col.get("can be converted to integer")
+        if int_conversion:
+            try:
+                df.with_columns(pl.col(col_name).cast(pl.Int64))
+            except Exception as e:
+                raise RuntimeError(f"Column {col_name} cannot be converted to integer: {e}")  # noqa: B904
+
     if len(error_messages) > 1:
         raise RuntimeError("\n".join(error_messages))
+    
+    validation_end_time = time.time()
+    duration = validation_end_time - validation_start_time
+    current_run.log_info(f"Validation took {duration:.2f} seconds.")
 
 
 def default_output_path() -> Path:
