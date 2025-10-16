@@ -23,6 +23,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 from openhexa.toolbox.dhis2.periods import period_from_string
+from validation_config import expected_columns
 
 
 @pipeline("dhis2-extract-analytics")
@@ -254,7 +255,7 @@ def validate_data(df: pl.DataFrame) -> None:
 
     If any validation fails, a `RuntimeError` is raised with one or more descriptive 
     error messages indicating the issue(s).
-
+ 
     Parameters
     ----------
     df : pl.DataFrame
@@ -270,74 +271,6 @@ def validate_data(df: pl.DataFrame) -> None:
     error_messages = ["\n"]
     if df.height == 0:
         error_messages.append("data_values is empty")
-
-    expected_columns = [
-        {
-            "name": "indicator_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "indicator_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "organisation_unit_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "period",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "value",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_1_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_2_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_3_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_4_id",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_1_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_2_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_3_name",
-            "type": "String",
-            "not null": False,
-        },
-        {
-            "name": "level_4_name",
-            "type": "String",
-            "not null": False,
-        },
-    ]
 
     # checking for unvalidated columns
     expected_column_names = [col["name"] for col in expected_columns]
@@ -360,7 +293,7 @@ def validate_data(df: pl.DataFrame) -> None:
             )
         # validating emptiness of a column
         if col["not null"]:
-            df_empty_or_null_cololumn = df.select(
+            df_empty_or_null_cololumn = df.filter(
                 (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
             )
             if df_empty_or_null_cololumn.height > 0:
