@@ -6,11 +6,15 @@ and categoryOptionCombos IDs.
 """
 
 import json
+import logging
+import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import polars as pl
+import requests
+from humanize import naturalsize
 from openhexa.sdk import (
     DHIS2Connection,
     current_run,
@@ -20,18 +24,76 @@ from openhexa.sdk import (
 )
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
 from openhexa.toolbox.dhis2 import DHIS2
-from openhexa.toolbox.dhis2.dataframe import extract_dataset
-from openhexa.toolbox.dhis2.periods import Period, period_from_string
+from openhexa.toolbox.dhis2.periods import Period, period_from_string, get_range
 
 
-def get_dhis2_client(connection: DHIS2Connection) -> DHIS2:
-    """Initialize DHIS2 client with caching.
+def get_dhis2_client(connection: DHIS2Connection, use_cache: bool) -> DHIS2:
+    """Initialize DHIS2 client with caching and patch API to handle empty responses.
 
     Returns:
         DHIS2: Configured DHIS2 client instance.
     """
-    cache_dir = Path(workspace.files_path) / ".cache"
-    return DHIS2(connection=connection, cache_dir=cache_dir)
+    if use_cache:
+        cache_dir = Path(".cache")
+    else:
+        cache_dir = None
+
+    dhis2_client = DHIS2(connection=connection, cache_dir=cache_dir)
+
+    # Monkey-patch the api.get() method to handle empty responses
+    def patched_get(endpoint: str, params: dict | None = None, use_cache: bool = True) -> dict:
+        """Patched GET request that handles empty responses from DHIS2."""
+        logger = logging.getLogger(__name__)
+
+        r = requests.Request(method="GET", url=f"{dhis2_client.api.url}/{endpoint}", params=params)
+        url = r.prepare().url
+        # current_run.log_info(f"GET {url}")
+
+        use_cache_flag = dhis2_client.api.cache and use_cache
+
+        if use_cache_flag:
+            cached = dhis2_client.api.cache.get(endpoint=endpoint, params=params)
+            if cached:
+                logger.debug("Cache hit, returning cached response")
+                return cached
+
+        r = dhis2_client.api.session.get(f"{dhis2_client.api.url}/{endpoint}", params=params)
+        dhis2_client.api.raise_if_error(r)
+
+        # Handle empty response (DHIS2 returns 200 with 0 bytes when no data exists)
+        if len(r.content) == 0:
+            logger.warning(f"Empty response from DHIS2 API for {endpoint}")
+            # Return empty dict or appropriate structure based on endpoint
+            if endpoint == "dataValueSets" or endpoint.startswith("dataValueSets"):
+                return {"dataValues": []}
+            return {}
+
+        # Try to parse JSON, catch JSONDecodeError
+        try:
+            json_response = r.json()
+        except requests.exceptions.JSONDecodeError:
+            logger.error(
+                f"Failed to parse JSON response from {endpoint}. "
+                f"Status: {r.status_code}, Content-Length: {len(r.content)}"
+            )
+            # For dataValueSets, return empty structure instead of raising
+            if endpoint == "dataValueSets" or endpoint.startswith("dataValueSets"):
+                logger.warning("Returning empty dataValues structure")
+                return {"dataValues": []}
+            raise
+
+        if use_cache_flag:
+            logger.debug("Cache miss, caching response")
+            dhis2_client.api.cache.set(endpoint=endpoint, params=params, response=json_response)
+
+        logger.debug(f"Successful request of size {naturalsize(len(r.content))}")
+
+        return json_response
+
+    # Apply the patch
+    dhis2_client.api.get = patched_get
+
+    return dhis2_client
 
 
 def validate_mapping_structure(
@@ -165,7 +227,163 @@ def apply_data_mappings(
     return data_values, stats
 
 
-def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]]:
+from itertools import islice
+
+
+def _chunked(iterable, size):
+    it = iter(iterable)
+    while True:
+        chunk = list(islice(it, size))
+        if not chunk:
+            break
+        yield chunk
+
+
+def build_cc_and_coc_cache(dhis2_client, data_values, de_chunk=200, cc_chunk=100):
+    """
+    dhis2_client: e.g. target_dhis2.client.api
+    data_values: iterable of dicts containing at least 'dataElement'
+    Returns:
+      de_to_cc:  {dataElementId -> categoryComboId}
+      cc_to_coc: {categoryComboId -> set(categoryOptionComboId)}
+    """
+
+    # 1) Distinct DE ids from the payload
+    de_ids = sorted({item["dataElement"] for item in data_values if "dataElement" in item})
+
+    # 2) Batch get DE -> CC
+    de_to_cc = {}
+    for chunk in _chunked(de_ids, de_chunk):
+        # /api/dataElements?filter=id:in:[id1,id2]&fields=id,categoryCombo[id]&paging=false
+        ids = ",".join(chunk)  # DHIS2 accepts comma-separated, or [id1,id2] depending on version
+        r = dhis2_client.get(
+            "dataElements",
+            params={
+                "filter": f"id:in:[{ids}]",
+                "fields": "id,categoryCombo[id]",
+                "paging": "false",
+            },
+        )
+        print(r)
+        for de in r.get("dataElements", []):
+            if "categoryCombo" in de and de["categoryCombo"]:
+                de_to_cc[de["id"]] = de["categoryCombo"]["id"]
+
+    # 3) Distinct CC ids
+    cc_ids = sorted(set(de_to_cc.values()))
+
+    # 4) Batch get CC -> COCs
+    cc_to_coc = {}
+    for chunk in _chunked(cc_ids, cc_chunk):
+        ids = ",".join(chunk)
+        r = dhis2_client.get(
+            "categoryCombos",
+            params={
+                "filter": f"id:in:[{ids}]",
+                "fields": "id,categoryOptionCombos[id]",
+                "paging": "false",
+            },
+        )
+
+        for cc in r.get("categoryCombos", []):
+            cc_to_coc[cc["id"]] = {coc["id"] for coc in cc.get("categoryOptionCombos", [])}
+
+    return de_to_cc, cc_to_coc
+
+
+def coc_is_valid_for_de(item, de_to_cc, cc_to_coc):
+    """
+    Returns True iff the item's categoryOptionCombo belongs to the DE's categoryCombo.
+    """
+    de = item.get("dataElement")
+    coc = item.get("categoryOptionCombo")
+    if not de or not coc:
+        return False
+    cc = de_to_cc.get(de)
+    if not cc:
+        return False
+    valid_cocs = cc_to_coc.get(cc)
+    if not valid_cocs:
+        return False
+    return coc in valid_cocs
+
+
+def coerce_value(value, value_type):
+    """Try to coerce value into the correct type for DHIS2.
+    Return None if not possible/consistent."""
+    try:
+        if value_type == "INTEGER":
+            return int(value)
+
+        elif value_type == "NUMBER":
+            return float(value)
+
+        elif value_type == "UNIT_INTERVAL":
+            v = float(value)
+            return v if 0 <= v <= 1 else None
+
+        elif value_type == "PERCENTAGE":
+            v = float(value)
+            return v if 0 <= v <= 100 else None
+
+        elif value_type == "INTEGER_POSITIVE":
+            v = int(value)
+            return v if v > 0 else None
+
+        elif value_type == "INTEGER_NEGATIVE":
+            v = int(value)
+            return v if v < 0 else None
+
+        elif value_type == "INTEGER_ZERO_OR_POSITIVE":
+            v = int(value)
+            return v if v >= 0 else None
+
+        elif value_type in ("TEXT", "LONG_TEXT"):
+            s = str(value)
+            if value_type == "TEXT" and len(s) > 50000:
+                return None
+            return s
+
+        elif value_type == "LETTER":
+            s = str(value)
+            return s if len(s) == 1 else None
+
+        elif value_type == "BOOLEAN":
+            if isinstance(value, bool):
+                return value
+            if str(value).strip().lower() in ["true", "1", "yes", "y"]:
+                return True
+            if str(value).strip().lower() in ["false", "0", "no", "n"]:
+                return False
+            return None
+
+        else:
+            # Not supported types
+            return None
+    except Exception:
+        return None
+
+
+def validate_and_transform(dv, client, value_types):
+    """Validate & coerce values for a payload list of data_values."""
+    de_uid = dv.get("dataElement")
+    if not de_uid:
+        return None  # skip if missing
+
+    # cache valueType per dataElement
+    if de_uid not in value_types:
+        value_types[de_uid] = client.meta.identifiable_objects(de_uid).get("valueType")
+
+    value_type = value_types[de_uid]
+    coerced = coerce_value(dv.get("value"), value_type)
+    if coerced is None:
+        # skip inconsistent
+        return None
+
+    return coerced
+
+
+def prepare_data_value_payload(data_values: pl.DataFrame, client) -> list[dict[str, Any]]:
     """Prepare data values for DHIS2 API payload.
 
     Returns:
@@ -188,16 +406,24 @@ def prepare_data_value_payload(data_values: pl.DataFrame) -> list[dict[str, Any]
     data_values = data_values.rename(mapping_toolbox_dhis2_name)
     # Convert to dictionaries
     payload = data_values.select(list(mapping_toolbox_dhis2_name.values())).to_dicts()
-
     # Convert values to strings as required by DHIS2
     valid_payload = []
+    value_types = {}
+    de_to_cc, cc_to_coc = build_cc_and_coc_cache(client.api, payload)
     for item in payload:
+        if len(set(mapping_toolbox_dhis2_name.values()) - set(item.keys())) > 0:
+            current_run.log_info(f"skip {item} for posting values")
+            continue
         if any([value is None for value in item.values()]):
             print(f"Skipping item with None values: {item}")
             continue  # Skip items with None values
         if "value" in item and item["value"] is not None:
-            item["value"] = int(item["value"])
-            valid_payload.append(item)
+            if coc_is_valid_for_de(item, de_to_cc, cc_to_coc):
+                value = validate_and_transform(item, client, value_types)
+                if value is not None:
+                    item["value"] = value
+                    valid_payload.append(item)
+
     return valid_payload
 
 
@@ -289,6 +515,15 @@ def calculate_relative_dates(days_back: int) -> tuple[str, str]:
     default=True,
     required=False,
 )
+@parameter(
+    "use_cache",
+    type=bool,
+    name="Use Cache",
+    default=False,
+    required=False,
+)
+@parameter("max_org_unit_per_request", type=int, default=20, required=False)
+@parameter("max_periods_per_request", type=int, default=5, required=False)
 def dhis2_to_dhis2_data_elements(
     source_connection: DHIS2Connection,
     target_connection: DHIS2Connection,
@@ -296,6 +531,9 @@ def dhis2_to_dhis2_data_elements(
     mapping_file: str,
     start_date: str,
     end_date: str,
+    use_cache: bool,
+    max_periods_per_request: int,
+    max_org_unit_per_request: int,
     dry_run: bool = False,
     different_org_units: bool = False,
     use_relative_dates: bool = False,
@@ -315,7 +553,9 @@ def dhis2_to_dhis2_data_elements(
         current_run.log_info(f"Using provided dates: {start_date} to {end_date}")
 
     # Initialize clients
-    source_dhis2, target_dhis2 = validate_connections(source_connection, target_connection)
+    source_dhis2, target_dhis2 = validate_connections(
+        source_connection, target_connection, use_cache
+    )
 
     # Load and validate mappings
     mapping_data = load_and_validate_mappings(
@@ -323,7 +563,14 @@ def dhis2_to_dhis2_data_elements(
     )
 
     # Extract source data
-    source_data = extract_source_data(source_dhis2, dataset_id, start_date, end_date)
+    source_data = extract_source_data(
+        source_dhis2,
+        dataset_id,
+        start_date,
+        end_date,
+        max_periods_per_request,
+        max_org_unit_per_request,
+    )
 
     # Validate org units
     # validated_data = validate_org_units(
@@ -343,6 +590,7 @@ def dhis2_to_dhis2_data_elements(
 def validate_connections(
     source_connection: DHIS2Connection,
     target_connection: DHIS2Connection,
+    use_cache: bool,
 ) -> tuple[DHIS2, DHIS2]:
     """Validate source and target DHIS2 connections.
 
@@ -352,12 +600,12 @@ def validate_connections(
     current_run.log_info("Validating DHIS2 connections...")
 
     # Initialize clients
-    source_dhis2 = get_dhis2_client(source_connection)
-    target_dhis2 = get_dhis2_client(target_connection)
+    source_dhis2 = get_dhis2_client(source_connection, use_cache)
+    target_dhis2 = get_dhis2_client(target_connection, use_cache)
 
     # Test source connection
     try:
-        source_dhis2.ping()
+        source_dhis2.meta.system_info()
         current_run.log_info(f"✓ Source DHIS2 connection successful: {source_dhis2.api.url}")
     except Exception as e:
         current_run.log_error(f"✗ Source DHIS2 connection failed: {e!s}")
@@ -365,7 +613,7 @@ def validate_connections(
 
     # Test target connection
     try:
-        target_dhis2.ping()
+        target_dhis2.meta.system_info()
         current_run.log_info(f"✓ Target DHIS2 connection successful: {target_dhis2.api.url}")
     except Exception as e:
         current_run.log_error(f"✗ Target DHIS2 connection failed: {e!s}")
@@ -604,8 +852,13 @@ def extract_source_data(
     dataset_id: str,
     start_date: str,
     end_date: str,
+    max_periods_per_request: int,
+    max_org_unit_per_request: int,
 ) -> pl.DataFrame:
     """Extract data values from source DHIS2 instance.
+
+    Uses period-based queries for better performance by generating a list of periods
+    and querying each individually rather than using date ranges.
 
     Returns:
         pl.DataFrame: Extracted data values.
@@ -614,24 +867,54 @@ def extract_source_data(
     dataset_org_units = get_dataset_org_units(source_dhis2, dataset_id)
     datasets = get_datasets_as_dict(source_dhis2)
     period_type = datasets[dataset_id]["periodType"]
+    current_run.log_info(f"  - Dataset period type: {period_type}")
+    source_dhis2.data_value_sets.MAX_ORG_UNITS = max_org_unit_per_request
+    source_dhis2.data_value_sets.MAX_PERIODS = max_periods_per_request
+    # Convert ISO dates to DHIS2 periods
+    start_period = isodate_to_period_type(start_date, period_type)
+    end_period = isodate_to_period_type(end_date, period_type)
+
+    # Generate list of periods for more efficient DHIS2 queries
+    periods = get_range(start_period, end_period)
+    periods_str = [str(p) for p in periods]
+    current_run.log_info(f"  - Querying {len(periods)} periods: {periods[0]} to {periods[-1]}")
     try:
-        data_values = extract_dataset(
-            dhis2=source_dhis2,
-            dataset=dataset_id,
-            start_date=isodate_to_period_type(start_date, period_type).datetime,
-            end_date=isodate_to_period_type(end_date, period_type).datetime,
+        # Use data_value_sets.get() with periods list
+        # The patched api.get() handles empty responses automatically
+        result = source_dhis2.data_value_sets.get(
+            datasets=[dataset_id],
+            periods=periods_str,
             org_units=dataset_org_units,
         )
+        data_values_list = result if isinstance(result, list) else []
 
-        current_run.log_info(f"✓ Extracted {len(data_values)} data values")
-        current_run.log_info(
-            f"  - Unique org units: {data_values['organisation_unit_id'].n_unique()}"
-        )
-        current_run.log_info(
-            f"  - Unique data elements: {data_values['data_element_id'].n_unique()}"
-        )
-        current_run.log_info(f"  - Date range: {start_date} to {end_date}")
+        # Convert to DataFrame with schema inference
+        if len(data_values_list) == 0:
+            current_run.log_warning("No data values returned from API")
+            data_values = pl.DataFrame()
+        else:
+            data_values = pl.DataFrame(data_values_list, infer_schema_length=None).rename(
+                {
+                    "dataElement": "data_element_id",
+                    "period": "period",
+                    "orgUnit": "organisation_unit_id",
+                    "categoryOptionCombo": "category_option_combo_id",
+                    "attributeOptionCombo": "attribute_option_combo_id",
+                    "value": "value",
+                }
+            )
 
+        if len(data_values) > 0:
+            current_run.log_info(f"✓ Extracted {len(data_values)} data values in bulk")
+            current_run.log_info(
+                f"  - Unique org units: {data_values['organisation_unit_id'].n_unique()}"
+            )
+            current_run.log_info(
+                f"  - Unique data elements: {data_values['data_element_id'].n_unique()}"
+            )
+            current_run.log_info(f"  - Date range: {start_date} to {end_date}")
+        else:
+            current_run.log_warning("No data values extracted from source dataset")
         return data_values
 
     except Exception as e:
@@ -764,6 +1047,40 @@ def transform_data_values(
     return transformed_data, stats
 
 
+def pretty_dhis2_error(err):
+    r = getattr(err, "response", None)
+    if not r:
+        current_run.log_info("No response on error.")
+        return
+
+    current_run.log_info(f"HTTP {r.status_code} {r.reason} — URL: {r.url}")
+    # Try JSON first, then fall back to text
+    try:
+        body = r.json()
+    except ValueError:
+        print(r.text[:4000])
+        return
+
+    print(json.dumps(body, indent=2, ensure_ascii=False))
+
+    # DHIS2 puts useful bits in a few shapes depending on version:
+    resp = body.get("response") or body.get("importConflicts") or {}
+    # 2.3x+/2.4x styles:
+    conflicts = resp.get("conflicts") or body.get("conflicts") or []
+    import_count = resp.get("importCount") or body.get("importCount")
+    status = body.get("status") or resp.get("status")
+
+    if import_count:
+        current_run.log_info(f"importCount: {import_count}")
+    if conflicts:
+        current_run.log_info("conflicts:")
+        for c in conflicts:
+            # can be {"object":"...","value":"..."} or {"errorCode":"...","message":"..."}
+            obj = c.get("object") or c.get("objectIndex") or ""
+            val = c.get("value") or c.get("message") or c
+            current_run.log_info(f"  - {obj}: {val}")
+
+
 def post_to_target(
     target_dhis2: DHIS2,
     transformed_data: pl.DataFrame,
@@ -780,25 +1097,217 @@ def post_to_target(
         current_run.log_warning("No data to post after transformation")
         return {"status": "no_data", "imported": 0, "updated": 0, "ignored": 0}
 
-    try:
-        # Prepare payload
-        payload = prepare_data_value_payload(transformed_data)
-        current_run.log_info(f"Prepared {len(payload)} data values for posting")
-        # Post data
-        target_dhis2.data_value_sets.MAX_POST_DATA_VALUES = 1000
-        response = target_dhis2.data_value_sets.post(
-            data_values=payload,
-            import_strategy="CREATE_AND_UPDATE",
-            dry_run=dry_run,
-            skip_validation=True,
-        )
-        # Log results
-        current_run.log_info("✓ Data posting completed")
-        return response
+    # Prepare payload
+    payload = prepare_data_value_payload(transformed_data, target_dhis2)
+    current_run.log_info(f"Prepared {len(payload)} data values for posting")
 
-    except Exception as e:
-        current_run.log_error(f"Error posting data: {e!s}")
-        raise
+    # Check if data elements are in datasets
+    check_datasets_associated(target_dhis2, payload)
+
+    # Configuration
+    chunk_size = 500
+    total_records = len(payload)
+    num_chunks = (total_records + chunk_size - 1) // chunk_size
+
+    current_run.log_info(
+        f"Splitting {total_records} records into {num_chunks} chunks of {chunk_size} records each"
+    )
+
+    # Initialize aggregated results
+    aggregated_results = {
+        "imported": 0,
+        "updated": 0,
+        "ignored": 0,
+        "deleted": 0,
+        "conflicts": [],
+    }
+
+    # Track failed chunks
+    failed_chunks = []
+
+    # Build query parameters
+    params = {
+        "importStrategy": "CREATE_AND_UPDATE",
+        "dryRun": "true" if dry_run else "false",
+        "skipValidation": "false",  # Enable validation to get detailed conflicts
+    }
+
+    # Process chunks
+    for i in range(0, total_records, chunk_size):
+        chunk = payload[i : i + chunk_size]
+        chunk_num = (i // chunk_size) + 1
+
+        current_run.log_info(f"Posting chunk {chunk_num}/{num_chunks} ({len(chunk)} records)...")
+
+        # Prepare DHIS2 API payload for this chunk
+        dhis2_payload = {"dataValues": chunk}
+
+        try:
+            # Post to DHIS2 API
+            response = target_dhis2.api.session.post(
+                f"{target_dhis2.api.url}/dataValueSets",
+                json=dhis2_payload,
+                params=params,
+            )
+            print(response.status_code)
+            print(response.json())
+            # Parse response
+            response_dict = response.json()
+
+            # Extract import counts from response
+            if "response" in response_dict:
+                import_summary = response_dict["response"]
+                import_count = import_summary.get("importCount", {})
+
+                # Aggregate counts
+                aggregated_results["imported"] += import_count.get("imported", 0)
+                aggregated_results["updated"] += import_count.get("updated", 0)
+                aggregated_results["ignored"] += import_count.get("ignored", 0)
+                aggregated_results["deleted"] += import_count.get("deleted", 0)
+
+                # Collect conflicts
+                chunk_conflicts = import_summary.get("conflicts", [])
+                if chunk_conflicts:
+                    aggregated_results["conflicts"].extend(chunk_conflicts)
+                    response_dict = response.json() if response else None
+                    error_response = _get_response_value_errors(response_dict, chunk=chunk)
+                    if response_dict:
+                        # Log error but continue processing
+                        # Store failed chunk with error details
+                        failed_chunks.append(
+                            {
+                                "chunk_number": chunk_num,
+                                "Errors_import": error_response,
+                            }
+                        )
+                current_run.log_info(
+                    f"  ✓ Chunk {chunk_num} - Imported: {import_count.get('imported', 0)}, "
+                    f"Updated: {import_count.get('updated', 0)}, "
+                    f"Ignored: {import_count.get('ignored', 0)}"
+                )
+
+        except requests.exceptions.RequestException as e:
+            response_dict = response.json() if response else None
+            error_response = _get_response_value_errors(response_dict, chunk=chunk)
+            if response_dict:
+                # Log error but continue processing
+                current_run.log_error(f"  ✗ Chunk {chunk_num} failed: {e!s}")
+                # Store failed chunk with error details
+                failed_chunks.append(
+                    {
+                        "chunk_number": chunk_num,
+                        "error": str(e),
+                        # "data_values": chunk,
+                        "response": error_response,
+                    }
+                )
+
+    # Handle failed chunks
+    if failed_chunks:
+        current_run.log_warning(f"⚠ {len(failed_chunks)} chunk(s) failed to post")
+
+        # Save failed chunks to file
+        failed_chunks_file = (
+            Path(f"{workspace.files_path}/pipelines/dhis2_to_dhis2_data_elements")
+            / "failed_chunks.json"
+        )
+        with failed_chunks_file.open("w", encoding="utf-8") as f:
+            json.dump(failed_chunks, f, indent=2)
+
+        current_run.log_warning(f"Failed chunks saved to: {failed_chunks_file}")
+        current_run.add_file_output(failed_chunks_file.as_posix())
+
+        # Calculate total records in failed chunks
+        failed_records = sum(len(fc["data_values"]) for fc in failed_chunks)
+        current_run.log_warning(f"Total failed records: {failed_records}/{total_records}")
+    else:
+        current_run.log_info("✓ All chunks posted successfully")
+
+    # Log final aggregated results
+    current_run.log_info(
+        f"Total Results - Imported: {aggregated_results['imported']}, "
+        f"Updated: {aggregated_results['updated']}, "
+        f"Ignored: {aggregated_results['ignored']}, "
+        f"Failed chunks: {len(failed_chunks)}"
+    )
+
+    # Log details about ignored records if any
+    if aggregated_results["ignored"] > 0:
+        conflicts = aggregated_results["conflicts"]
+        if conflicts:
+            current_run.log_warning(
+                f"Found {aggregated_results['ignored']} ignored records with conflicts:"
+            )
+            for i, conflict in enumerate(conflicts[:10], 1):
+                if isinstance(conflict, dict):
+                    obj = conflict.get("object", "Unknown")
+                    reason = conflict.get("value", "No reason provided")
+                    current_run.log_warning(f"  {i}. {obj}: {reason}")
+            if len(conflicts) > 10:
+                remaining = len(conflicts) - 10
+                current_run.log_warning(f"  ... and {remaining} more conflicts")
+        else:
+            current_run.log_warning(
+                f"Found {aggregated_results['ignored']} ignored records but no conflict details"
+            )
+
+    # Return aggregated results in expected format
+    return {
+        "status": "SUCCESS",
+        "imported": aggregated_results["imported"],
+        "updated": aggregated_results["updated"],
+        "ignored": aggregated_results["ignored"],
+        "deleted": aggregated_results["deleted"],
+        "conflicts": aggregated_results["conflicts"],
+    }
+
+
+def _get_response_value_errors(response: requests.Response, chunk: list | None) -> dict | None:
+    """Collect relevant data for error logs.
+
+    Returns:
+        dict | None: A dictionary containing relevant error data, or None if no errors are found.
+    """
+    if response is None:
+        return None
+
+    if len(chunk) == 0 or chunk is None:
+        return None
+
+    try:
+        out = {}
+        for k in ["responseType", "status", "description", "importCount", "dataSetComplete"]:
+            out[k] = response.get(k)
+        if response.get("conflicts"):
+            out["rejected_datapoints"] = []
+            for i in response.get("rejectedIndexes", []):
+                out["rejected_datapoints"].append(chunk[i])
+            out["conflicts"] = {}
+            for conflict in response["conflicts"]:
+                out["conflicts"]["object"] = conflict.get("object")
+                out["conflicts"]["objects"] = conflict.get("objects")
+                out["conflicts"]["value"] = conflict.get("value")
+                out["conflicts"]["errorCode"] = conflict.get("errorCode")
+        return out
+    except AttributeError:
+        return None
+
+
+def check_datasets_associated(target_dhis2, payload):
+    unique_des = set(dv["dataElement"] for dv in payload)
+    current_run.log_info(f"Checking {len(unique_des)} unique data elements...")
+    for de_id in unique_des:
+        fields = "id,name,dataSetElements[dataSet[id,name]]"
+        de_info = target_dhis2.api.get(f"dataElements/{de_id}", params={"fields": fields})
+        datasets = de_info.get("dataSetElements", []) if isinstance(de_info, dict) else []
+        if not datasets:
+            current_run.log_warning(
+                f"⚠ Data element {de_id} ({de_info.get('name', 'Unknown')}) "
+                f"is NOT assigned to any dataset!"
+            )
+        else:
+            dataset_names = [ds["dataSet"]["name"] for ds in datasets]
+            current_run.log_info(f"✓ Data element {de_id} in datasets: {', '.join(dataset_names)}")
 
 
 def generate_summary(
@@ -840,6 +1349,7 @@ def generate_summary(
             "imported": post_results.get("imported", 0),
             "updated": post_results.get("updated", 0),
             "ignored": post_results.get("ignored", 0),
+            "conflicts": post_results.get("conflicts", []),
         },
     }
 
