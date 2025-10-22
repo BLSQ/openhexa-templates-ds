@@ -146,38 +146,44 @@ def dhis2_metadata_extract(
 
 
 def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> None:
-    """Validate the contents of a Polars DataFrame against predefined schema rules.
+    """Validate a Polars DataFrame against a predefined schema specification.
 
-    This function performs the following validations:
-    1. Ensures the DataFrame is not empty.
-    2. Confirms that only expected columns are present in the DataFrame.
-    3. Checks that each expected column has the correct data type.
-    4. Verifies that columns marked as `not null` do not contain null or empty values.
+    This function performs a comprehensive validation of a DataFrame based on 
+    the expected schema rules provided in `expected_columns`. It checks for:
+    
+    1. **Non-emptiness** Ensures the DataFrame contains at least one row.
+    2. **Schema compliance** Confirms that only expected columns exist and 
+       that each column matches its expected data type.
+    3. **Non-null constraints** Verifies that columns marked as `not null` 
+       have no missing or empty values.
+    4. **Character limits** Checks that text columns do not exceed the 
+       specified maximum character length.
+    5. **Integer conversion** Validates that columns flagged as convertible 
+       to integers can be successfully cast.
 
-    If any validation fails, a `RuntimeError` is raised with one or more descriptive 
-    error messages indicating the issue(s).
+    If any of these validations fail, a `RuntimeError` is raised with detailed 
+    error messages summarizing all detected issues.
 
     Parameters
     ----------
     df : pl.DataFrame
-        The Polars DataFrame to be validated.
+        The Polars DataFrame to validate.
     expected_columns : dict
-        Columns together with their expected configurations
-    data_name: str
-        name of the dataset we 
+        A list or dictionary defining the expected schema for each column, where 
+        each entry includes the column name, data type, and optional constraints 
+        such as `not null`, `number of characters`, or `can be converted to integer`.
+    data_name : str
+        A human-readable identifier for the dataset being validated, used for logging.
 
     Raises
     ------
     RuntimeError
-        If the DataFrame is empty, contains unexpected columns, has incorrect data types,
-        or has missing values in columns that should not be null.
+        If any validation rule fails — including empty DataFrames, unexpected columns, 
+        schema mismatches, missing values, character limit violations, or failed type conversions.
     """
     current_run.log_info(f"Validating data in {data_name}")
     validation_start_time = time.time()
-    # with pl.Config(fmt_str_lengths=1000, tbl_width_chars=250) as cfg:
-    #     cfg.set_tbl_cols(df.width)
-    #     print(df)
-    # validating none emptiness
+
     error_messages = ["\n"]
     if df.height == 0:
         error_messages.append("data_values is empty")
