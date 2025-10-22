@@ -197,7 +197,6 @@ def save_table(table: pd.DataFrame, dhis2_name: str, dataset: Dataset, extract_n
         table (pd.DataFrame): The table to be saved.
         dhis2_name (str): The name of the DHIS2 instance.
         dataset (Dataset): The OpenHexa dataset where the table will be saved.
-        openhexa_dataset (Dataset | None): The OpenHexa dataset to save the table to. If None,
         the table will not be saved to the OpenHexa database.
         extract_name (str | None): The name of the extraction. If None, the current date and time
         will be used as the name.
@@ -272,7 +271,6 @@ def check_parameters_validation(ou_ids: list[str], ou_group_ids: list[str]):
     Args:
         ou_ids (list[str] | None): List of organization unit IDs or None.
         ou_group_ids (list[str] | None): List of organization unit group IDs or None.
-        ou_level (int | None): Level of organization units or None.
 
     """
     conditions = {
@@ -298,7 +296,6 @@ def warning_request(dataset_id: str, datasets: dict, selected_ou_ids: set) -> se
     Args:
         dataset_id (str): dataset ID.
         datasets (dict): Dictionary containing dataset information.
-        ous (list): List of organisation unit IDs.
         selected_ou_ids (set): set of orgunit ids selected by the parameters.
 
     Returns:
@@ -530,7 +527,6 @@ def extract_raw_data(
 
     Args:
         dhis (DHIS2): DHIS2 client object used to interact with the DHIS2 API.
-        selected_ou_ids (set): Set of selected organization unit IDs to extract data for.
         dataset_id (str): dataset ID to extract data from.
         datasets (dict): Dictionary containing dataset information, including data elements and
         organisation units.
@@ -818,7 +814,6 @@ def get_datasets_as_dict(dhis: DHIS2) -> dict[dict]:
     Args:
     ----
     dhis (DHIS2): The DHIS2 connection object.
-    dhis2_name (str): The name of the DHIS2 connection.
 
     Returns:
     -------
@@ -919,7 +914,6 @@ def period_to_period_type(period: str) -> str:
 
     Args:
         period (str): A DHIS2 period string (e.g., '202401', '2023Q3', '2023W14', etc.)
-        anchor_day (str): Week start day for weekly periods. E.g., 'Wednesday', 'Sunday'
 
     Returns:
         str: The detected DHIS2 period type (e.g., 'WeeklyWednesday')
