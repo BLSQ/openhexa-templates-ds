@@ -180,3 +180,5 @@ workspace/
 # Misc
 .DS_Store
 .vscode
+*/config.json
+myrequirements.txt
