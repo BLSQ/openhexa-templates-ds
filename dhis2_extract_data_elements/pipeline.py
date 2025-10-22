@@ -232,34 +232,40 @@ def dhis2_extract_data_elements(
 
 
 def validate_data(df: pl.DataFrame) -> None:
-    """Validate the contents of a Polars DataFrame against predefined schema rules.
+    """Validate a Polars DataFrame against a predefined schema specification.
 
-    This function performs the following validations:
+    This function enforces a series of validation checks to ensure the input 
+    DataFrame adheres to expected data quality standards. Specifically, it:
+
     1. Ensures the DataFrame is not empty.
-    2. Confirms that only expected columns are present in the DataFrame.
-    3. Checks that each expected column has the correct data type.
-    4. Verifies that columns marked as `not null` do not contain null or empty values.
+    2. Validates that only the expected columns are present.
+    3. Confirms each column matches the expected data type.
+    4. Checks that columns defined as `not null` do not contain null or empty values.
+    5. Ensures string columns do not exceed the specified maximum character length.
+    6. Verifies that columns marked as convertible to integers can be safely cast to integers.
 
-    If any validation fails, a `RuntimeError` is raised with one or more descriptive 
-    error messages indicating the issue(s).
+    Any violations are collected and reported together in a raised `RuntimeError`
+    with detailed messages describing each issue.
 
     Parameters
     ----------
     df : pl.DataFrame
-        The Polars DataFrame to be validated.
+        The Polars DataFrame to validate.
 
     Raises
     ------
     RuntimeError
-        If the DataFrame is empty, contains unexpected columns, has incorrect data types,
-        or has missing values in columns that should not be null.
+        If any of the following conditions are met:
+          - The DataFrame is empty.
+          - Unexpected columns are found.
+          - Column data types differ from expectations.
+          - Required (non-null) columns contain missing or empty values.
+          - Column values exceed defined character limits.
+          - Columns expected to be integer-convertible cannot be cast.
     """
     current_run.log_info("Validating data")
     validation_start_time = time.time()
-    # with pl.Config(fmt_str_lengths=1000, tbl_width_chars=250) as cfg:
-    #     cfg.set_tbl_cols(df.width)
-    #     print(df)
-    # validating none emptiness
+
     error_messages = ["\n"]
     if df.height == 0:
         error_messages.append("data_values is empty")
