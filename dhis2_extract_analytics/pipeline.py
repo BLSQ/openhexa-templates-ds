@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -245,28 +246,45 @@ def dhis2_extract_data_elements(
 
 
 def validate_data(df: pl.DataFrame) -> None:
-    """Validate the contents of a Polars DataFrame against predefined schema rules.
+    """Validates the structure and content of a Polars DataFrame against expected schema rules.
 
-    This function performs the following validations:
-    1. Ensures the DataFrame is not empty.
-    2. Confirms that only expected columns are present in the DataFrame.
-    3. Checks that each expected column has the correct data type.
-    4. Verifies that columns marked as `not null` do not contain null or empty values.
+    This function performs a series of validation checks on the provided DataFrame to ensure:
+      1. The DataFrame is not empty.
+      2. All expected columns are present and validated.
+      3. Each column has the correct data type as defined in `expected_columns`.
+      4. Columns marked as `not null` do not contain any null or empty string values.
 
-    If any validation fails, a `RuntimeError` is raised with one or more descriptive 
-    error messages indicating the issue(s).
- 
-    Parameters
-    ----------
-    df : pl.DataFrame
-        The Polars DataFrame to be validated.
+    If any validation check fails, a `RuntimeError` is raised summarizing all detected issues.
 
-    Raises
-    ------
-    RuntimeError
-        If the DataFrame is empty, contains unexpected columns, has incorrect data types,
-        or has missing values in columns that should not be null.
+    Args:
+        df (pl.DataFrame): The Polars DataFrame to validate.
+
+    Raises:
+        RuntimeError: If one or more validation rules are violated. The error message includes
+            all detected issues such as:
+              - Empty DataFrame
+              - Unexpected or unvalidated columns
+              - Data type mismatches
+              - Missing or null values in non-nullable columns
+
+    Notes:
+        - The function relies on a global variable `expected_columns`, which should be a list of
+          dictionaries. Each dictionary must define:
+              {
+                  "name": <column_name: str>,
+                  "type": <expected_polars_dtype: str>,
+                  "not null": <bool>
+              }
+
+        - Example structure of `expected_columns`:
+              expected_columns = [
+                  {"name": "id", "type": "Int64", "not null": True},
+                  {"name": "name", "type": "Utf8", "not null": True},
+                  {"name": "age", "type": "Int64", "not null": False},
+              ]
     """
+    current_run.log_info("Validating data")
+    validation_start_time = time.time()
     # validating none emptiness
     error_messages = ["\n"]
     if df.height == 0:
@@ -302,6 +320,9 @@ def validate_data(df: pl.DataFrame) -> None:
 
     if len(error_messages) > 1:
         raise RuntimeError("\n".join(error_messages))
+    validation_end_time = time.time()
+    duration = validation_end_time - validation_start_time
+    current_run.log_info(f"Validation took {duration:.2f} seconds.")
 
 
 def default_output_path() -> Path:
