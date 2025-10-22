@@ -39,9 +39,6 @@ class WorldPopClient:
             3-letter ISO code of the country (e.g., "COD", "BFA").
         output_dir : Path
             Directory to save the GeoTIFF file.
-        fname : str, optional
-            Filename to save the raster data. If None, defaults to
-            "{country_iso3}_worldpop_population_{year}.tif".
         year : str
             Year to filter the dataset (e.g., "2020").
         un_adj : bool
