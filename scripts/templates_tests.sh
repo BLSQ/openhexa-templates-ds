@@ -15,11 +15,18 @@ ls
 git fetch origin main
 
 if [ "$CURRENT_BRANCH" = "main" ]; then
-    echo "📘 On main branch — testing all top-level directories..."
-    changed_dirs=$(find . -mindepth 1 -maxdepth 1 -type d ! -name '.git' | sed 's|^\./||')
+echo "📘 On main branch — testing all top-level directories..."
+changed_dirs=$(find . -mindepth 1 -maxdepth 1 -type d ! -name '.git' | sed 's|^\./||')
 else
-    echo "📂 On feature branch — testing only changed directories..."
+echo "📂 On feature branch — testing only changed directories..."
+
+# Try to find a merge base safely
+if git merge-base --is-ancestor origin/main HEAD 2>/dev/null || git merge-base origin/main HEAD >/dev/null 2>&1; then
     changed_dirs=$(git diff --name-only origin/main...HEAD | awk -F/ '{print $1}' | sort -u)
+else
+    echo "⚠️ No merge base found — defaulting to all directories."
+    changed_dirs=$(find . -mindepth 1 -maxdepth 1 -type d ! -name '.git' | sed 's|^\./||')
+fi
 fi
 
 if [ -z "$changed_dirs" ]; then
