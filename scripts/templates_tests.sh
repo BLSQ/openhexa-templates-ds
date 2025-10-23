@@ -1,5 +1,8 @@
 set -e
 
+# Mark the repo as safe for Git operations
+git config --global --add safe.directory "$(pwd)"
+
 echo "🔍 Determining directories to test..."
 
 # Identify the current branch name
