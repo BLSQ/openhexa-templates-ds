@@ -8,6 +8,7 @@ echo "🔍 Determining directories to test..."
 # Identify the current branch name
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 echo "Current branch: $CURRENT_BRANCH"
+pwd
 
 # Fetch main branch for comparison
 git fetch origin main
