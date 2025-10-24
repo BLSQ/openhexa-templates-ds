@@ -123,14 +123,19 @@ def era5_sync(
     cds_api_url: str = cds_connection.url  # type: ignore
     cds_api_key: str = cds_connection.api_key  # type: ignore
 
+    client = Client(url=cds_api_url, key=cds_api_key, retry_after=30)
+    cache = Cache(
+        database_uri=workspace.database_url, cache_dir=Path(workspace.files_path) / "cache"
+    )
+
     if not variables:
         raise ValueError("At least one variable must be selected for extraction.")
 
     task1 = sync_variables(
+        client=client,
+        cache=cache,
         start_date=start_date,
         end_date=end_date,
-        cds_api_url=cds_api_url,
-        cds_api_key=cds_api_key,
         boundaries_file=Path(workspace.files_path, boundaries_file),
         variables=variables,
         output_dir=output_path,
@@ -150,9 +155,9 @@ def era5_sync(
 
 @era5_sync.task
 def sync_variables(
+    client: Client,
+    cache: Cache,
     start_date: str,
-    cds_api_url: str,
-    cds_api_key: str,
     boundaries_file: Path,
     variables: Sequence[str],
     output_dir: Path,
@@ -161,9 +166,9 @@ def sync_variables(
     """Synchronize data for ERA5-Land variables.
 
     Args:
+        client: CDS API client.
+        cache: Cache for ERA5 toolbox.
         start_date: Start date of the extraction period (YYYY-MM-DD).
-        cds_api_url: URL for the CDS API.
-        cds_api_key: Key for the CDS API.
         boundaries_file: Path to the boundaries file to use to determine the area to extract.
         variables: List of variables to sync.
         output_dir: Output directory for the downloaded data.
@@ -183,7 +188,6 @@ def sync_variables(
     area = _get_area_from_boundaries(boundaries)
 
     metadata = get_variables()
-    client = Client(url=cds_api_url, key=cds_api_key, retry_after=30)
 
     for variable in variables:
         if current_run:
@@ -196,6 +200,7 @@ def sync_variables(
 
         _sync_variable(
             client=client,
+            cache=cache,
             variable=variable,
             data_var=variable_short_name,
             start_date_dt=start_date_dt,
@@ -212,6 +217,7 @@ def sync_variables(
 
 def _sync_variable(
     client: Client,
+    cache: Cache,
     variable: str,
     data_var: str,
     start_date_dt: date,
@@ -223,6 +229,7 @@ def _sync_variable(
 
     Args:
         client: CDS API client.
+        cache: Cache for ERA5 toolbox.
         variable: Name of the variable to sync (e.g. '2m_temperature').
         data_var: Short name of the variable in the dataset (e.g. 't2m' for 2m_temperature).
         start_date_dt: Start date of the extraction period.
@@ -230,9 +237,6 @@ def _sync_variable(
         area: Area to extract (ymax, xmin, ymin, xmax).
         zarr_store: Path to the Zarr store for the variable.
     """
-    cache = Cache(
-        database_uri=workspace.database_url, cache_dir=Path(workspace.files_path) / "cache"
-    )
     with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
         raw_dir = Path(tmp_dir)
         requests = prepare_requests(
