@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import cProfile
 import logging
-import pstats
 import tempfile
 from collections.abc import Sequence
 from datetime import date, datetime
@@ -12,9 +10,9 @@ from pathlib import Path
 import geopandas as gpd
 import xarray as xr
 from openhexa.sdk import CustomConnection, current_run, parameter, pipeline, workspace
+from openhexa.toolbox.era5.cache import Cache
 from openhexa.toolbox.era5.extract import (
     Client,
-    _get_variables,  # noqa: PLC2701
     grib_to_zarr,
     prepare_requests,
     retrieve_requests,
@@ -27,6 +25,7 @@ from openhexa.toolbox.era5.transform import (
     calculate_wind_speed,
     create_masks,
 )
+from openhexa.toolbox.era5.utils import get_variables
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.WARNING)
@@ -127,7 +126,7 @@ def era5_sync(
     if not variables:
         raise ValueError("At least one variable must be selected for extraction.")
 
-    sync_variables(
+    task1 = sync_variables(
         start_date=start_date,
         end_date=end_date,
         cds_api_url=cds_api_url,
@@ -145,6 +144,7 @@ def era5_sync(
         boundaries_id_col=boundaries_id_col,
         periods=periods,
         output_dir=output_path,
+        wait_for=task1,
     )
 
 
@@ -182,7 +182,7 @@ def sync_variables(
     boundaries = _read_boundaries(boundaries_file)
     area = _get_area_from_boundaries(boundaries)
 
-    metadata = _get_variables()
+    metadata = get_variables()
     client = Client(url=cds_api_url, key=cds_api_key, retry_after=30)
 
     for variable in variables:
@@ -230,6 +230,9 @@ def _sync_variable(
         area: Area to extract (ymax, xmin, ymin, xmax).
         zarr_store: Path to the Zarr store for the variable.
     """
+    cache = Cache(
+        database_uri=workspace.database_url, cache_dir=Path(workspace.files_path) / "cache"
+    )
     with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
         raw_dir = Path(tmp_dir)
         requests = prepare_requests(
@@ -241,9 +244,15 @@ def _sync_variable(
             area=list(area),
             zarr_store=zarr_store,
         )
+        current_run.log_info(f"Prepared {len(requests)} data requests for variable '{variable}'")
         retrieve_requests(
-            client=client, dataset_id="reanalysis-era5-land", requests=requests, dst_dir=raw_dir
+            client=client,
+            dataset_id="reanalysis-era5-land",
+            requests=requests,
+            dst_dir=raw_dir,
+            cache=cache,
         )
+        current_run.log_info(f"Finished data retrieval for variable '{variable}'")
         grib_to_zarr(src_dir=raw_dir, zarr_store=zarr_store, data_var=data_var)
 
 
@@ -281,6 +290,7 @@ def process_variables(
     boundaries_id_col: str,
     periods: Sequence[Period],
     output_dir: Path,
+    wait_for: bool | None = None,
 ) -> bool:
     """Aggregate ERA5-Land data in space and time.
 
@@ -290,6 +300,7 @@ def process_variables(
         boundaries_id_col: Column in the boundaries GeoDataFrame to use as identifier.
         periods: List of periods to aggregate over (e.g. Period.DAY, Period.WEEK...).
         output_dir: Output directory for the aggregated data.
+        wait_for: Wait for the completion of the specified task before starting.
 
     Returns:
         True when task is complete.
@@ -300,7 +311,7 @@ def process_variables(
         raise ValueError(f"No Zarr stores found in directory '{src_dir}'")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    metadata = _get_variables()
+    metadata = get_variables()
 
     # load 1st zarr store available to create masks from boundaries
     ds = xr.open_zarr(zarr_stores[0], consolidated=True, decode_timedelta=False)
