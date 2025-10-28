@@ -200,13 +200,13 @@ def sync_variables(
 
         _sync_variable(
             client=client,
-            cache=cache,
             variable=variable,
             data_var=variable_short_name,
             start_date_dt=start_date_dt,
             end_date_dt=end_date_dt,
             area=area,
             zarr_store=zarr_store,
+            cache=cache,
         )
 
         if current_run:
@@ -217,25 +217,25 @@ def sync_variables(
 
 def _sync_variable(
     client: Client,
-    cache: Cache,
     variable: str,
     data_var: str,
     start_date_dt: date,
     end_date_dt: date,
     area: tuple[int, int, int, int],
     zarr_store: Path,
+    cache: Cache | None = None,
 ) -> None:
     """Synchronize a single variable for the specified date range and area.
 
     Args:
         client: CDS API client.
-        cache: Cache for ERA5 toolbox.
         variable: Name of the variable to sync (e.g. '2m_temperature').
         data_var: Short name of the variable in the dataset (e.g. 't2m' for 2m_temperature).
         start_date_dt: Start date of the extraction period.
         end_date_dt: End date of the extraction period.
         area: Area to extract (ymax, xmin, ymin, xmax).
         zarr_store: Path to the Zarr store for the variable.
+        cache: Cache for ERA5 toolbox.
     """
     with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
         raw_dir = Path(tmp_dir)
