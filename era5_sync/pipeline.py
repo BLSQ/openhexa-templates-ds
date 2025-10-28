@@ -156,22 +156,22 @@ def era5_sync(
 @era5_sync.task
 def sync_variables(
     client: Client,
-    cache: Cache,
     start_date: str,
     boundaries_file: Path,
     variables: Sequence[str],
     output_dir: Path,
+    cache: Cache | None = None,
     end_date: str | None = None,
 ) -> bool:
     """Synchronize data for ERA5-Land variables.
 
     Args:
         client: CDS API client.
-        cache: Cache for ERA5 toolbox.
         start_date: Start date of the extraction period (YYYY-MM-DD).
         boundaries_file: Path to the boundaries file to use to determine the area to extract.
         variables: List of variables to sync.
         output_dir: Output directory for the downloaded data.
+        cache: Cache for ERA5 toolbox.
         end_date: End date of the extraction period (YYYY-MM-DD, today by default).
 
     Returns:
