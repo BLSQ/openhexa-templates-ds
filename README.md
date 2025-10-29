@@ -44,7 +44,6 @@ This script performs two main validation steps:
 
    * `pipeline.py`
    * `README.md`
-   * `requirements.txt`
 
    Folders **without a `pipeline.py` file** are automatically skipped.
 
