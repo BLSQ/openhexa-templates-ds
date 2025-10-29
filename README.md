@@ -6,7 +6,7 @@ A collection of **OpenHEXA pipeline templates** created and maintained by the **
 
 ---
 
-## 🚀 Continuous Integration (CI)
+## Continuous Integration (CI)
 
 This repository uses **GitHub Actions** to automatically validate and test all OpenHEXA pipeline templates.
 
@@ -15,7 +15,7 @@ This repository uses **GitHub Actions** to automatically validate and test all O
 **File:** [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml)  
 **Triggers:** on every **push** and **pull request**
 
-#### 🧩 What the CI does
+#### What the CI does
 
 1. **Checks out** the repository.
 2. **Runs asset validation** via [`scripts/pipeline_template_contents.sh`](./scripts/pipeline_template_contents.sh):
@@ -34,7 +34,7 @@ This repository uses **GitHub Actions** to automatically validate and test all O
 
 ---
 
-## 🧰 Scripts Overview
+## Scripts Overview
 
 ### `scripts/pipeline_template_contents.sh`
 
@@ -53,7 +53,7 @@ If any required file is missing, the script lists all failing folders and exits 
 
 Runs **pytest with coverage** for changed or relevant pipeline directories.
 
-#### 🧠 How it works
+#### How it works
 
 1. Detects the **current branch** name.
 2. Fetches the `main` branch to compare differences.
@@ -93,7 +93,7 @@ If no directories have relevant changes:
 
 ---
 
-## 🧪 Running Locally
+## Running Locally
 
 You can reproduce the CI checks on your local machine:
 
@@ -114,7 +114,7 @@ pytest --cov=. --cov-report=term
 
 ---
 
-## 🧱 Repository Structure
+## Repository Structure
 
 A typical layout of the repository:
 
@@ -139,7 +139,7 @@ openhexa-templates-ds/
 
 ---
 
-## 📊 CI Summary
+## CI Summary
 
 | Step                | Description                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------- |
