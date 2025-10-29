@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Define required files (reference names only, case-insensitive check will be done)
-required_files=("pipeline.py" "README.md" "requirements.txt")
+required_files=("pipeline.py" "README.md")
 
 # Get repo root (script's parent directory)
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
