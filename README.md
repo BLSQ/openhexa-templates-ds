@@ -1,73 +1,137 @@
-
 # OpenHEXA Pipeline Templates
 
 [![CI](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml/badge.svg)](https://github.com/BLSQ/openhexa-templates-ds/actions/workflows/ci.yaml)
 
-A collection of **OpenHEXA pipeline templates** created and maintained by the Bluesquare Data Services team.
+A collection of **OpenHEXA pipeline templates** created and maintained by the **Bluesquare Data Services** team.
 
 ---
 
-## Continuous Integration (CI)
+## 🚀 Continuous Integration (CI)
 
 This repository uses **GitHub Actions** to automatically validate and test all OpenHEXA pipeline templates.
 
 ### Workflow: `ci.yaml`
 
 **File:** [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml)  
-**Runs on:** every **push** and **pull request**
+**Triggers:** on every **push** and **pull request**
 
-#### What it does
+#### 🧩 What the CI does
+
 1. **Checks out** the repository.
-2. **Pulls the latest OpenHEXA base environment**:  
-  ```bash
-   docker pull blsq/openhexa-blsq-environment:latest
-  ```
-3. **Runs the test suite** via [`scripts/tests.sh`](./scripts/tests.sh), which executes all validations.
+2. **Runs asset validation** via [`scripts/pipeline_template_contents.sh`](./scripts/pipeline_template_contents.sh):
+   - Ensures each valid pipeline folder contains:
+     - `pipeline.py`
+     - `README.md`
+   - Skips hidden directories and folders without a `pipeline.py`.
+3. **Runs tests with coverage** via [`scripts/templates_tests.sh`](./scripts/templates_tests.sh):
+   - Detects the current branch and compares it against `origin/main`.
+   - On feature branches, it **tests only directories that have changed**.
+   - On `main`, it **tests all directories**.
+   - For each directory:
+     - Installs dependencies from `requirements.txt` (if available).
+     - Runs all tests in the `tests/` subdirectory (if available).
+     - Reports **coverage results** directly in the workflow logs.
 
 ---
 
-## Test Process
+## 🧰 Scripts Overview
 
-### `scripts/tests.sh`
+### `scripts/pipeline_template_contents.sh`
 
-This script performs two main validation steps:
+Ensures all pipeline template folders meet minimum structural requirements.
 
-1. **Unit & Feature Tests**
-   Runs `pytest` inside the OpenHEXA Docker environment to ensure all test cases pass.
+**Checks performed:**
+- `pipeline.py` exists (case-insensitive)
+- `README.md` exists (case-insensitive)
+- Skips hidden directories and those without a `pipeline.py`.
 
-   ```bash
-   docker run -t blsq/openhexa-blsq-environment:latest pytest
-   ```
-
-2. **Template Structure Validation**
-   Runs [`scripts/pipeline_template_contents.sh`](./scripts/pipeline_template_contents.sh) to ensure each valid pipeline folder contains:
-
-   * `pipeline.py`
-   * `README.md`
-
-   Folders **without a `pipeline.py` file** are automatically skipped.
-
-If any test or structure check fails, the workflow exits with a non-zero status, marking the CI run as failed.
+If any required file is missing, the script lists all failing folders and exits with an error code, causing the CI to fail.
 
 ---
 
-## Repository Structure
+### `scripts/templates_tests.sh`
 
-Typical layout:
+Runs **pytest with coverage** for changed or relevant pipeline directories.
+
+#### 🧠 How it works
+
+1. Detects the **current branch** name.
+2. Fetches the `main` branch to compare differences.
+3. If on `main`:
+   - Runs tests for **all** top-level directories.
+4. If on a feature branch:
+   - Tries to find a **merge base** between `origin/main` and `HEAD`.
+   - If found → tests only changed directories.
+   - If no merge base → falls back to testing all directories.
+5. For each target directory:
+   - Installs dependencies (`requirements.txt`) if present.
+   - Runs `pytest` and shows coverage report (`--cov-report=term`).
+   - Skips directories without tests gracefully.
+
+#### Example output
+
+```
+
+📂 On feature branch — testing only changed directories...
+📁 Directories to test:
+template_a
+template_b
+----------
+
+📂 Processing directory: template_a
+📦 Installing dependencies for template_a...
+🧪 Running tests for template_a...
+
+```
+
+If no directories have relevant changes:
+```
+
+✅ No relevant changes detected. Exiting...
+
+````
+
+---
+
+## 🧪 Running Locally
+
+You can reproduce the CI checks on your local machine:
+
+```bash
+# Validate pipeline structure
+./scripts/pipeline_template_contents.sh
+
+# Run selective or full test suite (depending on branch)
+./scripts/templates_tests.sh
+````
+
+You can also run tests manually for a single template:
+
+```bash
+cd template_a
+pytest --cov=. --cov-report=term
+```
+
+---
+
+## 🧱 Repository Structure
+
+A typical layout of the repository:
 
 ```
 openhexa-templates-ds/
 ├── template_a/
 │   ├── pipeline.py
 │   ├── requirements.txt
+│   ├── tests/
 │   └── README.md
 ├── template_b/
 │   ├── pipeline.py
 │   ├── requirements.txt
 │   └── README.md
 ├── scripts/
-│   ├── tests.sh
-│   └── pipeline_template_contents.sh
+│   ├── pipeline_template_contents.sh
+│   └── templates_tests.sh
 └── .github/
     └── workflows/
         └── ci.yaml
@@ -75,29 +139,17 @@ openhexa-templates-ds/
 
 ---
 
-## Local Testing
+## 📊 CI Summary
 
-You can run the same checks locally before pushing:
+| Step                | Description                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| **Run Assets**      | Validates that all template folders have required files (`pipeline.py`, `README.md`). |
+| **Run Tests**       | Executes `pytest` for changed or all directories, depending on the branch.            |
+| **Coverage Report** | Prints coverage results in CI logs for each tested directory.                         |
 
-```bash
-# Run the same validations as the CI
-./scripts/tests.sh
-```
-
----
-
-## CI Summary
-
-| Step                   | Description                                              |
-| ---------------------- | -------------------------------------------------------- |
-| **Build**              | Pulls the OpenHEXA environment |
-| **Run Tests**          | Executes pytest inside Docker                            |
-| **Validate Templates** | Ensures all required files exist per pipeline            |
-
-All steps run automatically on every push or pull request to maintain template quality and consistency.
+All steps run automatically on every push or pull request to ensure template quality and maintainability.
 
 ---
 
-**Maintained by:** Bluesquare Data Services Team
-
+**Maintained by:** [Bluesquare Data Services Team](https://www.bluesquarehub.com/)
 **Environment:** [`blsq/openhexa-blsq-environment:latest`](https://hub.docker.com/r/blsq/openhexa-blsq-environment)
