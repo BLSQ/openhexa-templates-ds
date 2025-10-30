@@ -364,7 +364,8 @@ def process_variables(
             periods=periods,
             output_dir=output_dir,
         )
-        current_run.log_info("Relative humidity calculated successfully")
+        if current_run:
+            current_run.log_info("Relative humidity calculated successfully")
 
     # Calculate wind speed if both u10 and v10 are available
     if "10m_u_component_of_wind" in available_vars and "10m_v_component_of_wind" in available_vars:
