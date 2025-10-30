@@ -1,4 +1,5 @@
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,8 @@ import xarray as xr
 from openhexa.toolbox.era5.extract import Cache, Client, Request
 from openhexa.toolbox.era5.transform import Period
 from pipeline import process_variables, sync_variables
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def mock_retrieve_requests(
