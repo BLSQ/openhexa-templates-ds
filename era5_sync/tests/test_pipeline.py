@@ -8,8 +8,7 @@ import polars as pl
 import xarray as xr
 from openhexa.toolbox.era5.extract import Cache, Client, Request
 from openhexa.toolbox.era5.transform import Period
-
-from era5_sync.pipeline import process_variables, sync_variables
+from pipeline import process_variables, sync_variables
 
 
 def mock_retrieve_requests(
