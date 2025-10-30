@@ -7,7 +7,7 @@ on:
   pull_request:
 
 jobs:
-  build:
+  tests:
     runs-on: ubuntu-latest
     container:
       image: blsq/openhexa-blsq-environment:1.16.2
@@ -17,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run assets
+      - name: Check pipelines contents
         run: ./scripts/pipeline_template_contents.sh
 
       - name: Run pytest with coverage
