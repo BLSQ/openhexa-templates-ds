@@ -27,7 +27,7 @@ def mock_retrieve_requests(
         print(f"Copied {grib_file} to {dst_dir / grib_file.name}.")
 
 
-@patch("era5_sync.pipeline.retrieve_requests")
+@patch("pipeline.retrieve_requests")
 def test_sync_variables(mock_retrieve: Mock) -> None:
     """Test sync_variables task.
 
