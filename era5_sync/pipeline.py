@@ -248,7 +248,10 @@ def _sync_variable(
             area=list(area),
             zarr_store=zarr_store,
         )
-        current_run.log_info(f"Prepared {len(requests)} data requests for variable '{variable}'")
+        if current_run:
+            current_run.log_info(
+                f"Prepared {len(requests)} data requests for variable '{variable}'"
+            )
         retrieve_requests(
             client=client,
             dataset_id="reanalysis-era5-land",
@@ -256,7 +259,8 @@ def _sync_variable(
             dst_dir=raw_dir,
             cache=cache,
         )
-        current_run.log_info(f"Finished data retrieval for variable '{variable}'")
+        if current_run:
+            current_run.log_info(f"Retrieved data for variable '{variable}'")
         grib_to_zarr(src_dir=raw_dir, zarr_store=zarr_store, data_var=data_var)
 
 
@@ -349,7 +353,8 @@ def process_variables(
     # Calculate relative humidity if both t2m and d2m are available
     available_vars = [zarr_store.stem for zarr_store in zarr_stores]
     if "2m_temperature" in available_vars and "2m_dewpoint_temperature" in available_vars:
-        current_run.log_info("Calculating relative humidity")
+        if current_run:
+            current_run.log_info("Calculating relative humidity")
         zarr_store_t2m = src_dir / "2m_temperature.zarr"
         zarr_store_d2m = src_dir / "2m_dewpoint_temperature.zarr"
         _process_relative_humidity(
@@ -363,7 +368,8 @@ def process_variables(
 
     # Calculate wind speed if both u10 and v10 are available
     if "10m_u_component_of_wind" in available_vars and "10m_v_component_of_wind" in available_vars:
-        current_run.log_info("Calculating wind speed")
+        if current_run:
+            current_run.log_info("Calculating wind speed")
         zarr_store_u10 = src_dir / "10m_u_component_of_wind.zarr"
         zarr_store_v10 = src_dir / "10m_v_component_of_wind.zarr"
         _process_wind_speed(
@@ -373,7 +379,8 @@ def process_variables(
             periods=periods,
             output_dir=output_dir,
         )
-        current_run.log_info("Wind speed calculated successfully")
+        if current_run:
+            current_run.log_info("Wind speed calculated successfully")
 
     return True
 
