@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: blsq/openhexa-blsq-environment:latest
+      image: blsq/openhexa-blsq-environment:1.16.2
       options: --user root
     steps:
       - uses: actions/checkout@v4
