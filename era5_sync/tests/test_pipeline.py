@@ -50,7 +50,6 @@ def test_sync_variables(mock_retrieve: Mock) -> None:
     variables = ["2m_temperature", "total_precipitation", "2m_dewpoint_temperature"]
     with tempfile.TemporaryDirectory() as tmp_dir:
         output_dir = Path(tmp_dir)
-        output_dir = Path("data/tests_output")
         task = sync_variables(
             client=mock_client,
             start_date=start_date,
@@ -63,21 +62,15 @@ def test_sync_variables(mock_retrieve: Mock) -> None:
         task.run()
         # 3 zarr stores created - one per variable
         assert len(list(output_dir.glob("*.zarr"))) == 3
-        ds = xr.open_dataset(
-            output_dir / "2m_dewpoint_temperature.zarr", engine="zarr", decode_timedelta=False
-        )
+        ds = xr.open_zarr(output_dir / "2m_dewpoint_temperature.zarr", decode_timedelta=False)
         assert len(ds.time) == 260  # n_steps (4) * n_days (65)
         assert len(ds.latitude) == 21
         assert len(ds.longitude) == 21
-        ds = xr.open_dataset(
-            output_dir / "2m_temperature.zarr", engine="zarr", decode_timedelta=False
-        )
+        ds = xr.open_zarr(output_dir / "2m_temperature.zarr", decode_timedelta=False)
         assert len(ds.time) == 260  # n_steps (4) * n_days (65)
         assert len(ds.latitude) == 21
         assert len(ds.longitude) == 21
-        ds = xr.open_dataset(
-            output_dir / "total_precipitation.zarr", engine="zarr", decode_timedelta=False
-        )
+        ds = xr.open_zarr(output_dir / "total_precipitation.zarr", decode_timedelta=False)
         assert len(ds.time) == 65  # n_steps (1) * n_days (65)
         assert len(ds.latitude) == 21
         assert len(ds.longitude) == 21
