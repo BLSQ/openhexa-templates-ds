@@ -1,0 +1,3 @@
+openhexa-toolbox[era5] @ git+https://github.com/BLSQ/openhexa-toolbox@feat/era5-rewrite
+xarray>=2025.9.1
+zarr
