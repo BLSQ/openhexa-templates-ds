@@ -1,17 +1,23 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
 
 jobs:
-  build:
+  tests:
     runs-on: ubuntu-latest
     container:
-      image: blsq/openhexa-blsq-environment:latest
+      image: blsq/openhexa-blsq-environment:1.16.2
       options: --user root
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Run assets
+      - name: Check pipelines contents
         run: ./scripts/pipeline_template_contents.sh
 
       - name: Run pytest with coverage
