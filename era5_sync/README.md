@@ -159,12 +159,12 @@ For each geometry in the boundaries file, we:
 
 ### Temporal aggregation
 
-For **instantaneous variables**, we (temperature, wind, etc.), we:
+For **sampled variables** (temperature, wind, soil moisture), we:
 1. resample hourly data to daily statistics (mean, min, max)
 2. aggregate daily values to weekly/monthly means
 
-For **accumulated variables** (precipitation, evaporation), we:
-1. use accumulation values at the end of each day
+For **accumulated variables** (precipitation, evaporation, runoff), we:
+1. sum hourly accumulations to daily totals
 2. sum daily totals to weekly/monthly totals
 
 ## Pipeline flow
