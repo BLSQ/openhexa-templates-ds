@@ -13,7 +13,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     get_organisation_units,
 )
 
-from dhis2_metadata_extract.data_validation import validate_data
+from dhis2_metadata_extract.validate import validate_data
 from dhis2_metadata_extract.validation_config import (
     org_unit_groups_expected_columns,
     org_units_expected_columns,

@@ -20,7 +20,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 
-from dhis2_extract_data_elements.data_validation import validate_data
+from dhis2_extract_data_elements.validate import validate_data
 
 
 @pipeline("dhis2-extract-data-elements")

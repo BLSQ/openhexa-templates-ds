@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
 
-from build_dataset.data_validations import validate_data
+from build_dataset.validate import validate_data
 
 
 @pipeline("build_dataset")
