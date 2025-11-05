@@ -86,9 +86,9 @@ def validate_data(df: pl.DataFrame) -> None:
             try:
                 df.with_columns(pl.col(col_name).cast(pl.Int64))
             except Exception as e:
-                raise RuntimeError(
+                raise RuntimeError(  # noqa: B904
                     f"Column {col_name} cannot be converted to integer: {e}"
-                )  # noqa: B904
+                )
 
     if len(error_messages) > 1:
         raise RuntimeError("\n".join(error_messages))
