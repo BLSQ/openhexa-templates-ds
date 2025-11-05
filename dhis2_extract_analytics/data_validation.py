@@ -1,5 +1,6 @@
 import polars as pl
-from validation_config import expected_columns
+
+from dhis2_extract_analytics.validation_config import expected_columns
 
 
 def validate_data(df: pl.DataFrame) -> None:
