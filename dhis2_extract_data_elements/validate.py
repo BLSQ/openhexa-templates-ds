@@ -6,7 +6,7 @@ from dhis2_extract_data_elements.validation_config import expected_columns
 def validate_data(df: pl.DataFrame) -> None:
     """Validate a Polars DataFrame against a predefined schema specification.
 
-    This function enforces a series of validation checks to ensure the input 
+    This function enforces a series of validation checks to ensure the input
     DataFrame adheres to expected data quality standards. Specifically, it:
 
     1. Ensures the DataFrame is not empty.
@@ -63,17 +63,21 @@ def validate_data(df: pl.DataFrame) -> None:
                 (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
             )
             if df_empty_or_null_cololumn.height > 0:
-                error_messages.append(f"Column {col_name} has missing values."
-                                      "It is not expected have any value missing")
+                error_messages.append(
+                    f"Column {col_name} has missing values."
+                    "It is not expected have any value missing"
+                )
 
         # validating number of characters
         char_num = col.get("number of characters")
         if char_num:
             df_with_char_count = df.filter(
                 pl.col(col_name).str.len_chars().alias("char_count") != char_num
-                )
+            )
             if df_with_char_count.height > 0:
-                raise RuntimeError(f"Found values exceeding {char_num} characters:\n{col_name}")
+                raise RuntimeError(
+                    f"Found values exceeding {char_num} characters:\n{col_name}"
+                )
 
         # validating column values to be
         # able to converted to integers
@@ -82,7 +86,9 @@ def validate_data(df: pl.DataFrame) -> None:
             try:
                 df.with_columns(pl.col(col_name).cast(pl.Int64))
             except Exception as e:
-                raise RuntimeError(f"Column {col_name} cannot be converted to integer: {e}")  # noqa: B904
+                raise RuntimeError(
+                    f"Column {col_name} cannot be converted to integer: {e}"
+                )  # noqa: B904
 
     if len(error_messages) > 1:
         raise RuntimeError("\n".join(error_messages))
