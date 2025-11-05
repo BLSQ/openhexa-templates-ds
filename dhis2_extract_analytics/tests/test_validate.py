@@ -63,7 +63,7 @@ def test_validate_data():
     # check that the function raises error 
     # when type of data is not correct
     df3 = df = pl.DataFrame({
-    "indicator_id": [1, 2], # test case
+    "indicator_id": [1, 2],  # test case
     "indicator_name": ["Malaria Cases", "HIV Tests"],
     "organisation_unit_id": ["OU_001", "OU_002"],
     "period": ["202501", "202502"],
