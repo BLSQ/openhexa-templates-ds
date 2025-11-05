@@ -6,7 +6,6 @@ from pathlib import Path
 
 import polars as pl
 import requests
-from data_validation import validate_data
 from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.sdk.pipelines.parameter import DHIS2Widget, parameter
 from openhexa.sdk.pipelines.pipeline import pipeline
@@ -24,6 +23,8 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 from openhexa.toolbox.dhis2.periods import period_from_string
+
+from dhis2_extract_analytics.data_validation import validate_data
 
 
 @pipeline("dhis2-extract-analytics")
