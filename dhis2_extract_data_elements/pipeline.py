@@ -178,7 +178,9 @@ def dhis2_extract_data_elements(
             dhis2=dhis2,
             data_elements=data_elements,
             org_units=organisation_units if organisation_units else None,
-            org_unit_groups=organisation_unit_groups if organisation_unit_groups else None,
+            org_unit_groups=(
+                organisation_unit_groups if organisation_unit_groups else None
+            ),
             include_children=include_children,
             start_date=datetime.fromisoformat(start_date),
             end_date=datetime.fromisoformat(end_date),
@@ -189,7 +191,9 @@ def dhis2_extract_data_elements(
             dhis2=dhis2,
             data_element_groups=data_element_groups,
             org_units=organisation_units if organisation_units else None,
-            org_unit_groups=organisation_unit_groups if organisation_unit_groups else None,
+            org_unit_groups=(
+                organisation_unit_groups if organisation_unit_groups else None
+            ),
             include_children=include_children,
             start_date=datetime.fromisoformat(start_date),
             end_date=datetime.fromisoformat(end_date),
@@ -317,7 +321,9 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     """
     if dataset.latest_version is not None:
         if in_dataset_version(file=fp, dataset_version=dataset.latest_version):
-            current_run.log_info("File is already in the dataset and no changes have been detected")
+            current_run.log_info(
+                "File is already in the dataset and no changes have been detected"
+            )
             return
 
     # increment dataset version name and create the new dataset version
@@ -329,7 +335,9 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     dataset_version = dataset.create_version(name=f"v{version_number}")
 
     dataset_version.add_file(fp, "data_values.parquet")
-    current_run.log_info(f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}")
+    current_run.log_info(
+        f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}"
+    )
 
 
 def md5_from_url(url: str) -> str:

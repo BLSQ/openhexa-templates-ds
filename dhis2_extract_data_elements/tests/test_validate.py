@@ -22,9 +22,7 @@ def test_validate_data():
     }
 
     df = pl.DataFrame(schema=schema)
-    with pytest.raises(
-        RuntimeError
-    ) as execution_info:
+    with pytest.raises(RuntimeError) as execution_info:
         validate_data(df)
     assert execution_info.type is RuntimeError
 
@@ -57,13 +55,13 @@ def test_validate_data():
             ],
         }
     )
-    df2 = df2.with_columns([
-        pl.col("created").cast(pl.Datetime("ms", "UTC")),
-        pl.col("last_updated").cast(pl.Datetime("ms", "UTC")),
-    ])
-    with pytest.raises(
-        RuntimeError
-    ) as execution_info:
+    df2 = df2.with_columns(
+        [
+            pl.col("created").cast(pl.Datetime("ms", "UTC")),
+            pl.col("last_updated").cast(pl.Datetime("ms", "UTC")),
+        ]
+    )
+    with pytest.raises(RuntimeError) as execution_info:
         validate_data(df2)
 
     # check raise of error when number of characters is not correct
@@ -95,13 +93,13 @@ def test_validate_data():
             ],
         }
     )
-    df2 = df2.with_columns([
-        pl.col("created").cast(pl.Datetime("ms", "UTC")),
-        pl.col("last_updated").cast(pl.Datetime("ms", "UTC")),
-    ])
-    with pytest.raises(
-        RuntimeError
-    ) as execution_info:
+    df2 = df2.with_columns(
+        [
+            pl.col("created").cast(pl.Datetime("ms", "UTC")),
+            pl.col("last_updated").cast(pl.Datetime("ms", "UTC")),
+        ]
+    )
+    with pytest.raises(RuntimeError) as execution_info:
         validate_data(df2)
 
     # check raise of error when values can not be converted to integers
@@ -133,11 +131,11 @@ def test_validate_data():
             ],
         }
     )
-    df2 = df2.with_columns([
-        pl.col("created").cast(pl.Datetime("ms", "UTC")),
-        pl.col("last_updated").cast(pl.Datetime("ms", "UTC")),
-    ])
-    with pytest.raises(
-        RuntimeError
-    ) as execution_info:
+    df2 = df2.with_columns(
+        [
+            pl.col("created").cast(pl.Datetime("ms", "UTC")),
+            pl.col("last_updated").cast(pl.Datetime("ms", "UTC")),
+        ]
+    )
+    with pytest.raises(RuntimeError) as execution_info:
         validate_data(df2)
