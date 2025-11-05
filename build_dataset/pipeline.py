@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+from data_validations import validate_data
 from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
 
 
@@ -121,24 +122,6 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
                 continue
 
     # Upload to dataset version using DatasetVersion.add_file
-
-
-def validate_data(df: pd.DataFrame) -> None:
-    """Validate that the provided DataFrame and its data.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        The DataFrame to validate.
-
-    Raises
-    ------
-    RuntimeError
-        If the DataFrame has zero rows.
-    """
-    # validate for none emptiness
-    if df.shape[0] == 0:
-        raise RuntimeError("The output dataset is empty")
 
 
 def parse_period_column(df: pd.DataFrame) -> pd.DataFrame:
