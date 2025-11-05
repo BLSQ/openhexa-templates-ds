@@ -70,7 +70,7 @@ def validate_data(df: pl.DataFrame) -> None:
         char_num = col.get("number of characters")
         if char_num:
             df_with_char_count = df.filter(
-                pl.col(col_name).str.len_chars().alias("char_count") > char_num
+                pl.col(col_name).str.len_chars().alias("char_count") != char_num
                 )
             if df_with_char_count.height > 0:
                 raise RuntimeError(f"Found values exceeding {char_num} characters:\n{col_name}")
