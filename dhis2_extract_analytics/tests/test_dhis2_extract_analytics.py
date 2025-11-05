@@ -17,7 +17,7 @@ def test_default_output_path_creates_expected_directory_and_returns_correct_path
         - The timestamp in the path matches the mocked datetime.
         - The parent directory is automatically created.
         - The returned path ends with 'data_values.parquet'.
-    
+
     Args:
         mock_datetime (MagicMock): Mock for datetime to make output predictable.
         mock_workspace (MagicMock): Mock for the global workspace path.

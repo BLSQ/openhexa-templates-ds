@@ -71,8 +71,10 @@ def validate_data(df: pl.DataFrame) -> None:
                 (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
             )
             if df_empty_or_null_cololumn.height > 0:
-                error_messages.append(f"Column {col_name} has missing values."
-                                      "It is not expected have any value missing")
+                error_messages.append(
+                    f"Column {col_name} has missing values."
+                    "It is not expected have any value missing"
+                )
 
     if len(error_messages) > 1:
         raise RuntimeError("\n".join(error_messages))
