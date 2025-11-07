@@ -81,8 +81,8 @@ flowchart TD
     C --> D[Fetch form questions & choices]
     D --> E[Validate data structure]
     E --> F{Import Strategy}
-    F -->|CREATE| G[Generate template(s) & create instances]
-    F -->|UPDATE| H[Generate template(s) & update instances]
+    F -->|CREATE| G[Generate template & create instances]
+    F -->|UPDATE| H[Generate template & update instances]
     F -->|CREATE_AND_UPDATE| I[Split rows -> create & update]
     F -->|DELETE| J[Delete instances]
     G --> K[Upload XML / form_upload]
