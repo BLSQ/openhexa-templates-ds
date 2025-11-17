@@ -23,8 +23,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 from openhexa.toolbox.dhis2.periods import period_from_string
-
-from dhis2_extract_analytics.validate import validate_data
+from validate import validate_data
 
 
 @pipeline("dhis2-extract-analytics")
