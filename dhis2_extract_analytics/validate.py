@@ -81,7 +81,7 @@ def validate_data(df: pl.DataFrame) -> None:
     If any validation check fails, a `RuntimeError` is raised summarizing all detected issues.
 
     Args:
-        df (pl.DataFrame): The Polars DataFrame to validate.
+        df : The Polars DataFrame to validate.
 
     Raises:
         RuntimeError: If one or more validation rules are violated. The error message includes

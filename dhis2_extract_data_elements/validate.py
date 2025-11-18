@@ -114,12 +114,11 @@ def validate_data(df: pl.DataFrame) -> None:
     Any violations are collected and reported together in a raised `RuntimeError`
     with detailed messages describing each issue.
 
-    Parameters
-    ----------
-    df : pl.DataFrame
-        The Polars DataFrame to validate.
+    Args:
+    ----
+    df : The Polars DataFrame to validate.
 
-    Raises
+    Raises:
     ------
     RuntimeError
         If any of the following conditions are met:
