@@ -20,8 +20,8 @@ def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> N
     If any of these validations fail, a `RuntimeError` is raised with detailed 
     error messages summarizing all detected issues.
 
-    Parameters
-    ----------
+    Args:
+    ----
     df : pl.DataFrame
         The Polars DataFrame to validate.
     expected_columns : dict
@@ -31,7 +31,7 @@ def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> N
     data_name : str
         A human-readable identifier for the dataset being validated, used for logging.
 
-    Raises
+    Raises:
     ------
     RuntimeError
         If any validation rule fails — including empty DataFrames, unexpected columns, 
