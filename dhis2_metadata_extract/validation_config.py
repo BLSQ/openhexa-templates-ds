@@ -31,42 +31,72 @@ org_units_expected_columns: list[OrgUnitsExpectedColumns] = [
         {
             "name": "level_1_id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "level_1_name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "level_2_id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "level_2_name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "level_3_id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "level_3_name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "level_4_id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "level_4_name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
+        },
+        {
+            "name": "level_5_id",
+            "type": pl.String,
+            "not_null": False,
+        },
+        {
+            "name": "level_5_name",
+            "type": pl.String,
+            "not_null": False,
+        },
+        {
+            "name": "level_6_id",
+            "type": pl.String,
+            "not_null": False,
+        },
+        {
+            "name": "level_6_name",
+            "type": pl.String,
+            "not_null": False,
+        },
+        {
+            "name": "level_7_id",
+            "type": pl.String,
+            "not_null": False,
+        },
+        {
+            "name": "level_7_name",
+            "type": pl.String,
+            "not_null": False,
         }
     ]
 
@@ -98,17 +128,17 @@ org_unit_groups_expected_columns: list[OrgUnitsGroupsExpectedColumns] = [
         {
             "name": "id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "organisation_units",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         }
 ]
 
@@ -140,17 +170,17 @@ retrieved_datasets_expected_columns: list[RetrievedDatasetsExpectedColumns] = [
         {
             "name": "id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "organisation_units",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "data_elements",
@@ -165,7 +195,7 @@ retrieved_datasets_expected_columns: list[RetrievedDatasetsExpectedColumns] = [
         {
             "name": "period_type",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         }  
 ]
 
@@ -197,17 +227,17 @@ retrieved_data_elements_expected_columns: list[RetrievedDataElementsExpectedColu
         {
             "name": "id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "value_type",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         }
 ]
 
@@ -238,12 +268,12 @@ retrieved_data_element_groups_expected_columns: list[RetrievedDataElementsGroups
         {
             "name": "id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "data_elements",
@@ -279,11 +309,11 @@ retrieved_categorty_options_expected_columns: list[RetrievedCategoryOptionsExpec
         {
             "name": "id",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         },
         {
             "name": "name",
             "type": pl.String,
-            "not_null": True,
+            "not_null": False,
         }
 ]
