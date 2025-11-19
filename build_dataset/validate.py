@@ -2,7 +2,7 @@ import pandas as pd
 
 
 def validate_data(df: pd.DataFrame) -> None:
-    """Validate that the provided DataFrame and its data.
+    """Validate that the provided DataFrame has data.
 
     Parameters
     ----------
