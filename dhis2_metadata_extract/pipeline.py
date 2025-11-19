@@ -307,7 +307,6 @@ def retrieve_data_elements(dhis2_client: DHIS2, output_path: Path, run: bool = T
         try:
             data_elements = get_data_elements(dhis2_client)
             filename = f"data_elements_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
-            print(data_elements)
             validate_data(
                 data_elements,
                 retrieved_data_elements_expected_columns,
