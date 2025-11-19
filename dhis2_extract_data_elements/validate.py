@@ -73,7 +73,6 @@ expected_columns: list[ExpectedColumn] = [
     {
         "name": "value",
         "type": pl.String,
-        "number_of_characters": 2,
         "can_be_converted_to_integer": True,
         "not_null": False,
     },
@@ -173,11 +172,15 @@ def validate_data(df: pl.DataFrame) -> None:
         error_messages.append(
             f"Data in column(s) {unvalidated_columns} is(are) not validated"
         )
+    # Stop early if names mismatch — prevents key errors
+    if len(error_messages) > 1:
+        raise RuntimeError("\n".join(error_messages))
+
     for col in expected_columns:
         col_name = col["name"]
         col_type = col["type"]
         # validating data types
-        if str(df.schema[col_name]) != col_type:
+        if df.schema[col_name] != col_type:
             error_messages.append(
                 f"Type of column {col_name} is {df.schema[col_name]} and"
                 f"does not match expected type: {col_type}"
@@ -189,7 +192,7 @@ def validate_data(df: pl.DataFrame) -> None:
             )
             if df_empty_or_null_cololumn.height > 0:
                 error_messages.append(
-                    f"Column {col_name} has missing values."
+                    f"Column {col_name} has missing values. "
                     "It is not expected have any value missing"
                 )
 
@@ -199,6 +202,7 @@ def validate_data(df: pl.DataFrame) -> None:
             df_with_char_count = df.filter(
                 pl.col(col_name).str.len_chars().alias("char_count") != char_num
             )
+
             if df_with_char_count.height > 0:
                 raise RuntimeError(
                     f"Found values exceeding {char_num} characters:\n{col_name}"
