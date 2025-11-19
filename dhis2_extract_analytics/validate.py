@@ -152,7 +152,7 @@ def validate_data(df: pl.DataFrame) -> None:
             f"Data in column(s) {unvalidated_columns} is(are) not validated"
         )
     # Stop early if names mismatch — prevents key errors
-    if len(error_messages) > 0:
+    if len(error_messages) > 1:
         raise RuntimeError("\n".join(error_messages))
 
     for col in expected_columns:
@@ -171,7 +171,7 @@ def validate_data(df: pl.DataFrame) -> None:
             )
             if df_empty_or_null_cololumn.height > 0:
                 error_messages.append(
-                    f"Column {col_name} has missing values."
+                    f"Column {col_name} has missing values. "
                     "It is not expected have any value missing"
                 )
 
