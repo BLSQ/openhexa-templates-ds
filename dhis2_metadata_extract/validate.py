@@ -10,7 +10,7 @@ def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> N
     1. **Non-emptiness** Ensures the DataFrame contains at least one row.
     2. **Schema compliance** Confirms that only expected columns exist and 
        that each column matches its expected data type.
-    3. **Non-null constraints** Verifies that columns marked as `not null` 
+    3. **Non-null constraints** Verifies that columns marked as `not_null` 
        have no missing or empty values.
     4. **Character limits** Checks that text columns do not exceed the 
        specified maximum character length.
@@ -27,7 +27,7 @@ def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> N
     expected_columns : dict
         A list or dictionary defining the expected schema for each column, where 
         each entry includes the column name, data type, and optional constraints 
-        such as `not null`, `number of characters`, or `can be converted to integer`.
+        such as `not_null`, `number of characters`, or `can be converted to integer`.
     data_name : str
         A human-readable identifier for the dataset being validated, used for logging.
 
@@ -50,6 +50,10 @@ def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> N
         error_messages.append(
             f"Data in column(s) {unvalidated_columns} is(are) not validated"
         )
+    # Stop early if names mismatch — prevents key errors
+    if len(error_messages) > 0:
+        raise RuntimeError("\n".join(error_messages))
+
     for col in expected_columns:
         col_name = col["name"]
         col_type = col["type"]
@@ -60,7 +64,7 @@ def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> N
                 f"does not match expected type: {col_type}"
             )
         # validating emptiness of a column
-        if col["not null"]:
+        if col["not_null"]:
             df_empty_or_null_cololumn = df.filter(
                 (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
             )
