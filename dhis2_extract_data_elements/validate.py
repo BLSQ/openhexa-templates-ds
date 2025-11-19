@@ -1,133 +1,164 @@
-import polars as pl
+from typing import NotRequired, TypedDict
 
-expected_columns = [
+import polars as pl
+from polars._typing import PolarsDataType
+
+
+class ExpectedColumn(TypedDict):
+    """Specification for a single expected DataFrame column.
+
+    Defines the schema requirements for a column in a Polars DataFrame.
+    Used by `validate_data` to enforce column presence, data type, nullability,
+    string length, and integer convertibility.
+
+    Attributes:
+        name (str): 
+            The expected column name.
+        type (PolarsDataType): 
+            The expected Polars data type of the column.
+        not_null (bool): 
+            Whether the column must not contain null or empty-string values.
+        number_of_characters (int, optional): 
+            Maximum allowed number of characters for string values. If specified,
+            all values must match this exact character length.
+        can_be_converted_to_integer (bool, optional): 
+            Whether all values in the column must be safely convertible to integers.
+    """
+
+    name: str
+    type: PolarsDataType
+    not_null: bool
+    number_of_characters: NotRequired[int]
+    can_be_converted_to_integer: NotRequired[bool]
+
+
+expected_columns: list[ExpectedColumn] = [
     {
         "name": "data_element_id",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "data_element_name",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "organisation_unit_id",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "category_option_combo_id",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "attribute_option_combo_id",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "category_option_combo_name",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "period",
-        "type": "String",
-        "number of characters": 6,
-        "can be converted to integer": True,
-        "not null": False,
+        "type": pl.String,
+        "number_of_characters": 6,
+        "can_be_converted_to_integer": True,
+        "not_null": False,
     },
     {
         "name": "value",
-        "type": "String",
-        "number of characters": 2,
-        "can be converted to integer": True,
-        "not null": False,
+        "type": pl.String,
+        "number_of_characters": 2,
+        "can_be_converted_to_integer": True,
+        "not_null": False,
     },
     {
         "name": "level_1_id",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "level_2_id",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "level_3_id",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "level_4_id",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "level_1_name",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "level_2_name",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "level_3_name",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "level_4_name",
-        "type": "String",
-        "not null": False,
+        "type": pl.String,
+        "not_null": False,
     },
     {
         "name": "created",
-        "type": "Datetime(time_unit='ms', time_zone='UTC')",
-        "not null": False,
+        "type": pl.Datetime,
+        "not_null": False,
     },
     {
         "name": "last_updated",
-        "type": "Datetime(time_unit='ms', time_zone='UTC')",
-        "not null": False,
+        "type": pl.Datetime,
+        "not_null": False,
     },
 ]
 
 
 def validate_data(df: pl.DataFrame) -> None:
-    """Validate a Polars DataFrame against a predefined schema specification.
+    """Validate a Polars DataFrame against a predefined schema.
 
-    This function enforces a series of validation checks to ensure the input
-    DataFrame adheres to expected data quality standards. Specifically, it:
+    This function performs a comprehensive validation of the DataFrame against
+    the `expected_columns` schema. It checks for structural and data-quality issues,
+    and raises a single `RuntimeError` summarizing all violations.
 
-    1. Ensures the DataFrame is not empty.
-    2. Validates that only the expected columns are present.
-    3. Confirms each column matches the expected data type.
-    4. Checks that columns defined as `not null` do not contain null or empty values.
-    5. Ensures string columns do not exceed the specified maximum character length.
-    6. Verifies that columns marked as convertible to integers can be safely cast to integers.
-
-    Any violations are collected and reported together in a raised `RuntimeError`
-    with detailed messages describing each issue.
+    Validation rules include:
+        * DataFrame must not be empty.
+        * Only expected columns are allowed; unexpected columns are flagged.
+        * Each column must match the expected Polars data type.
+        * Columns marked `not_null` cannot contain null or empty-string values.
+        * Columns with a `number_of_characters` constraint must have exactly
+          the specified number of characters.
+        * Columns marked `can_be_converted_to_integer` must be safely castable
+          to integers.
 
     Args:
-    ----
-    df : The Polars DataFrame to validate.
+        df (pl.DataFrame): The Polars DataFrame to validate.
 
     Raises:
-    ------
-    RuntimeError
-        If any of the following conditions are met:
-          - The DataFrame is empty.
-          - Unexpected columns are found.
-          - Column data types differ from expectations.
-          - Required (non-null) columns contain missing or empty values.
-          - Column values exceed defined character limits.
-          - Columns expected to be integer-convertible cannot be cast.
+        RuntimeError: If any of the validation rules are violated. Potential
+        issues include:
+            - Empty DataFrame
+            - Unexpected or extra columns
+            - Column data type mismatches
+            - Null or empty values in non-nullable columns
+            - String values exceeding or not matching the required character length
+            - Values that cannot be converted to integers when expected
     """
     error_messages = ["\n"]
     if df.height == 0:
@@ -152,7 +183,7 @@ def validate_data(df: pl.DataFrame) -> None:
                 f"does not match expected type: {col_type}"
             )
         # validating emptiness of a column
-        if col["not null"]:
+        if col["not_null"]:
             df_empty_or_null_cololumn = df.filter(
                 (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
             )
@@ -162,8 +193,8 @@ def validate_data(df: pl.DataFrame) -> None:
                     "It is not expected have any value missing"
                 )
 
-        # validating number of characters
-        char_num = col.get("number of characters")
+        # validating number_of_characters
+        char_num = col.get("number_of_characters")
         if char_num:
             df_with_char_count = df.filter(
                 pl.col(col_name).str.len_chars().alias("char_count") != char_num
@@ -175,7 +206,7 @@ def validate_data(df: pl.DataFrame) -> None:
 
         # validating column values to be
         # able to converted to integers
-        int_conversion = col.get("can be converted to integer")
+        int_conversion = col.get("can_be_converted_to_integer")
         if int_conversion:
             try:
                 df.with_columns(pl.col(col_name).cast(pl.Int64))
