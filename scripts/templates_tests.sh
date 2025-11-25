@@ -52,6 +52,7 @@ for dir in $changed_dirs; do
         if [ -d "$dir/tests" ]; then
         echo "🧪 Running tests for $dir..."
         cd "$dir"
+        export PYTHONPATH=`pwd`
         pytest --cov=. --cov-report=term
         cd -
         else

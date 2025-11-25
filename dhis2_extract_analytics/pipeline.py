@@ -23,6 +23,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 from openhexa.toolbox.dhis2.periods import period_from_string
+from validate import validate_data
 
 
 @pipeline("dhis2-extract-analytics")
@@ -211,12 +212,16 @@ def dhis2_extract_data_elements(
     current_run.log_info("Joining object names to output data")
     data_values = join_object_names(
         df=data_values,
-        data_elements=src_data_elements if "data_element_id" in data_values.columns else None,
+        data_elements=(
+            src_data_elements if "data_element_id" in data_values.columns else None
+        ),
         indicators=src_indicators if "indicator_id" in data_values.columns else None,
         organisation_units=src_organisation_units,
-        category_option_combos=src_category_option_combos
-        if "category_option_combo_id" in data_values.columns
-        else None,
+        category_option_combos=(
+            src_category_option_combos
+            if "category_option_combo_id" in data_values.columns
+            else None
+        ),
     )
     current_run.log_info("Sucessfully joined object names to output data")
 
@@ -226,6 +231,7 @@ def dhis2_extract_data_elements(
     else:
         dst_file = default_output_path()
 
+    validate_data(data_values)
     current_run.log_info(f"Writing data to {dst_file}")
     data_values.write_parquet(dst_file)
     current_run.add_file_output(dst_file.as_posix())
@@ -311,7 +317,9 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     """
     if dataset.latest_version is not None:
         if in_dataset_version(file=fp, dataset_version=dataset.latest_version):
-            current_run.log_info("File is already in the dataset and no changes have been detected")
+            current_run.log_info(
+                "File is already in the dataset and no changes have been detected"
+            )
             return
 
     # increment dataset version name and create the new dataset version
@@ -323,7 +331,9 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     dataset_version = dataset.create_version(name=f"v{version_number}")
 
     dataset_version.add_file(fp, "data_values.parquet")
-    current_run.log_info(f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}")
+    current_run.log_info(
+        f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}"
+    )
 
 
 def md5_from_url(url: str) -> str:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
+from validate import validate_data
 
 
 @pipeline("build_dataset")
@@ -110,6 +111,9 @@ def load_and_save(dataset_paths: list[str], dataset: Dataset):
 
             output_filename = f"{data_element_folder}.csv"
             output_path = f"{workspace.files_path}/{dataset_path_str}/{output_filename}"
+            # data validations at the end of the pipeline
+            validate_data(concatenated_df)
+
             concatenated_df.to_csv(output_path, index=False)
             version.add_file(source=output_path, filename=output_filename)
             current_run.log_info(f"Added file: {output_filename} to dataset version")

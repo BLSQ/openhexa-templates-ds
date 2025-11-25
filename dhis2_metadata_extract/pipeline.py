@@ -12,6 +12,15 @@ from openhexa.toolbox.dhis2.dataframe import (
     get_organisation_unit_groups,
     get_organisation_units,
 )
+from validate import validate_data
+from validation_config import (
+    org_unit_groups_expected_columns,
+    org_units_expected_columns,
+    retrieved_categorty_options_expected_columns,
+    retrieved_data_element_groups_expected_columns,
+    retrieved_data_elements_expected_columns,
+    retrieved_datasets_expected_columns,
+)
 
 
 @pipeline("dhis2_metadata_extract")
@@ -182,6 +191,7 @@ def retrieve_org_units(
             org_units = org_units.filter(pl.col("level") == max_level).drop(
                 ["id", "name", "level", "opening_date", "closed_date", "geometry"]
             )
+            validate_data(org_units, org_units_expected_columns, data_name="org_units")
             filename = f"org_units_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=org_units, output_path=output_path, filename=filename)
         except Exception as e:
@@ -217,6 +227,12 @@ def retrieve_org_unit_groups(
             org_unit_groups = org_unit_groups.with_columns(
                 [pl.col("organisation_units").list.join(",").alias("organisation_units")]
             )
+
+            validate_data(
+                org_unit_groups,
+                org_unit_groups_expected_columns,
+                data_name="org_unit_groups"
+                )
             filename = f"org_units_groups_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=org_unit_groups, output_path=output_path, filename=filename)
         except Exception as e:
@@ -256,6 +272,12 @@ def retrieve_datasets(
                     pl.col("indicators").list.join(",").alias("indicators"),
                 ]
             )
+
+            validate_data(
+                datasets,
+                retrieved_datasets_expected_columns,
+                data_name="datasets"
+                )
             filename = f"datasets_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=datasets, output_path=output_path, filename=filename)
         except Exception as e:
@@ -285,6 +307,11 @@ def retrieve_data_elements(dhis2_client: DHIS2, output_path: Path, run: bool = T
         try:
             data_elements = get_data_elements(dhis2_client)
             filename = f"data_elements_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
+            validate_data(
+                data_elements,
+                retrieved_data_elements_expected_columns,
+                data_name="data_elements"
+                )
             save_file(df=data_elements, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving data elements: {e}") from e
@@ -315,6 +342,12 @@ def retrieve_data_element_groups(dhis2_client: DHIS2, output_path: Path, run: bo
             data_element_groups = data_element_groups.with_columns(
                 [pl.col("data_elements").list.join(",").alias("data_elements")]
             )
+
+            validate_data(
+                data_element_groups,
+                retrieved_data_element_groups_expected_columns,
+                data_name="data_element_groups"
+                )
             filename = f"data_element_groups_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=data_element_groups, output_path=output_path, filename=filename)
         except Exception as e:
@@ -345,6 +378,12 @@ def retrieve_category_option_combos(
         current_run.log_info("Retrieving category option combos")
         try:
             categorty_options = get_category_option_combos(dhis2_client)
+
+            validate_data(
+                categorty_options,
+                retrieved_categorty_options_expected_columns,
+                data_name="categorty_options"
+                )
             filename = f"category_option_combos_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=categorty_options, output_path=output_path, filename=filename)
         except Exception as e:
