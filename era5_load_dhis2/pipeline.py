@@ -135,7 +135,6 @@ def era5_load_dhis2(
         logger.error(msg)
         raise FileNotFoundError(msg)
 
-    print(dst_dhis2)
     dhis2 = DHIS2(dst_dhis2, cache_dir=Path(workspace.files_path, ".cache"))
     files = index_data_dir(src_dir)
     de_mapping = read_mapping(data_elements_mapping)
