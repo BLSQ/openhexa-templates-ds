@@ -1,6 +1,7 @@
 from typing import TypedDict
 
 import polars as pl
+from openhexa.sdk import current_run
 from polars._typing import PolarsDataType
 
 
@@ -176,4 +177,6 @@ def validate_data(df: pl.DataFrame) -> None:
                 )
 
     if len(error_messages) > 1:
-        raise RuntimeError("\n".join(error_messages))
+        message = "\n".join(error_messages)
+        current_run.log_error(message)
+        raise RuntimeError(message)

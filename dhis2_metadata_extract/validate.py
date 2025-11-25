@@ -1,4 +1,5 @@
 import polars as pl
+from openhexa.sdk import current_run
 
 
 def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> None:
@@ -47,7 +48,7 @@ def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> N
         # validating data types
         if df.schema[col_name] != col_type:
             error_messages.append(
-                f"Type of column {col_name} is {df.schema[col_name]} and"
+                f"Type of column {col_name} is {df.schema[col_name]} and "
                 f"does not match expected type: {col_type}"
             )
         # validating emptiness of a column
@@ -78,4 +79,6 @@ def validate_data(df: pl.DataFrame, expected_columns: dict, data_name: str) -> N
                 raise RuntimeError(f"Column {col_name} cannot be converted to integer: {e}")  # noqa: B904
 
     if len(error_messages) > 1:
-        raise RuntimeError("\n".join(error_messages))
+        message = "\n".join(error_messages)
+        current_run.log_error(message)
+        raise RuntimeError(message)

@@ -1,4 +1,5 @@
 import pandas as pd
+from openhexa.sdk import current_run
 
 
 def validate_data(df: pd.DataFrame) -> None:
@@ -16,4 +17,5 @@ def validate_data(df: pd.DataFrame) -> None:
     """
     # validate for none emptiness
     if df.shape[0] == 0:
+        current_run.log_error("The output dataset is empty")
         raise RuntimeError("The output dataset is empty")
