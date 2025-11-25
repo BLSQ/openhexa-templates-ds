@@ -233,7 +233,7 @@ def as_data_values(files: list[ERA5File], variable: str, period: Period) -> pl.D
             pl.col("boundary").alias("organisation_unit_id"),
             pl.lit("default").alias("category_option_combo_id"),
             pl.lit("default").alias("attribute_option_combo_id"),
-            pl.col("value").cast(pl.String),
+            pl.col("value").round(5).cast(pl.String),
         )
         df = df.vstack(df_var)
 
