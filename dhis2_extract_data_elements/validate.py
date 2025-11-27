@@ -13,16 +13,16 @@ class ExpectedColumn(TypedDict):
     string length, and integer convertibility.
 
     Attributes:
-        name (str): 
+        name (str):
             The expected column name.
-        type (PolarsDataType): 
+        type (PolarsDataType):
             The expected Polars data type of the column.
-        not_null (bool): 
+        not_null (bool):
             Whether the column must not contain null or empty-string values.
-        number_of_characters (int, optional): 
+        number_of_characters (int, optional):
             Maximum allowed number of characters for string values. If specified,
             all values must match this exact character length.
-        can_be_converted_to_integer (bool, optional): 
+        can_be_converted_to_integer (bool, optional):
             Whether all values in the column must be safely convertible to integers.
     """
 
@@ -67,14 +67,11 @@ expected_columns: list[ExpectedColumn] = [
     {
         "name": "period",
         "type": pl.String,
-        "number_of_characters": 6,
-        "can_be_converted_to_integer": True,
         "not_null": False,
     },
     {
         "name": "value",
         "type": pl.String,
-        "can_be_converted_to_integer": True,
         "not_null": False,
     },
     {
@@ -166,13 +163,9 @@ def validate_data(df: pl.DataFrame) -> None:
 
     # checking for unvalidated columns
     expected_column_names = [col["name"] for col in expected_columns]
-    unvalidated_columns = [
-        col for col in df.columns if col not in expected_column_names
-    ]
+    unvalidated_columns = [col for col in df.columns if col not in expected_column_names]
     if len(unvalidated_columns) > 0:
-        error_messages.append(
-            f"Data in column(s) {unvalidated_columns} is(are) not validated"
-        )
+        error_messages.append(f"Data in column(s) {unvalidated_columns} is(are) not validated")
     # Stop early if names mismatch — prevents key errors
     if len(error_messages) > 1:
         raise RuntimeError("\n".join(error_messages))
@@ -205,9 +198,7 @@ def validate_data(df: pl.DataFrame) -> None:
             )
 
             if df_with_char_count.height > 0:
-                raise RuntimeError(
-                    f"Found values exceeding {char_num} characters:\n{col_name}"
-                )
+                raise RuntimeError(f"Found values exceeding {char_num} characters:\n{col_name}")
 
         # validating column values to be
         # able to converted to integers
