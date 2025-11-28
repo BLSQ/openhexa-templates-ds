@@ -227,6 +227,7 @@ def as_data_values(files: list[ERA5File], variable: str, period: Period) -> pl.D
             continue
         logger.info(f"Processing ERA5 file: {f['fpath'].name}")
         df_var = pl.read_parquet(f["fpath"])
+        df_var = df_var.with_columns(value=_convert(df_var["value"], f["variable"]))
         df_var = df_var.select(
             pl.lit(f["variable"]).alias("data_element_id"),
             pl.col("period"),
@@ -238,6 +239,26 @@ def as_data_values(files: list[ERA5File], variable: str, period: Period) -> pl.D
         df = df.vstack(df_var)
 
     return df
+
+
+def _convert(values: pl.Series, variable: str) -> pl.Series:
+    """Convert units of ERA5 variable values for DHIS2 import.
+
+    Args:
+        values: Series of variable values.
+        variable: Variable name.
+
+    Returns:
+        Series of converted variable values.
+    """
+    var = variable.lower().split("_")[0]
+    if var in ("t2m", "d2m", "stl1"):
+        # Convert from Kelvin to Celsius
+        return values - 273.15
+    if var in ("tp", "e", "ro"):
+        # Convert from meters to millimeters
+        return values * 1000
+    return values
 
 
 def read_mapping(mapping_path: str) -> dict[str, str]:
