@@ -137,8 +137,11 @@ def era5_load_dhis2(
 
     dhis2 = DHIS2(dst_dhis2, cache_dir=Path(workspace.files_path, ".cache"))
     files = index_data_dir(src_dir)
-    de_mapping = read_mapping(data_elements_mapping)
-    ou_mapping = read_mapping(org_units_mapping) if org_units_mapping else None
+    de_mapping = read_mapping(Path(workspace.files_path, data_elements_mapping))
+    if org_units_mapping:
+        ou_mapping = read_mapping(Path(workspace.files_path, org_units_mapping))
+    else:
+        ou_mapping = None
 
     default_coc = get_default_coc(dhis2)
     run.log_info(f"Using default category option combo: {default_coc}")
@@ -261,11 +264,11 @@ def _convert(values: pl.Series, variable: str) -> pl.Series:
     return values
 
 
-def read_mapping(mapping_path: str) -> dict[str, str]:
+def read_mapping(fpath: Path) -> dict[str, str]:
     """Read mapping from a JSON file.
 
     Args:
-        mapping_path: Path to the mapping JSON file.
+        fpath: Path to the mapping file.
 
     Returns:
         Mapping as a dictionary.
@@ -274,7 +277,6 @@ def read_mapping(mapping_path: str) -> dict[str, str]:
         FileNotFoundError: If the mapping file does not exist.
         ValueError: If the mapping file is not JSON.
     """
-    fpath = Path(workspace.files_path, mapping_path)
     if not fpath.exists():
         msg = f"Mapping file not found: {fpath}"
         logger.error(msg)
