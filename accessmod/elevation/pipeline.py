@@ -1,27 +1,20 @@
-# from pathlib import Path
 import os
-from typing import List  # noqa: UP035
+import tempfile
+from datetime import datetime
+from pathlib import Path
+from typing import List
 
 import boto3
 import geopandas as gpd
 import rasterio
 import rasterio.merge
-from appdirs import user_cache_dir
+
 from botocore import UNSIGNED
 from botocore.config import Config
-from openhexa.sdk import current_run, pipeline  # workspace, parameter
+from openhexa.sdk import current_run, parameter, pipeline, workspace
 from osgeo import gdal
 from shapely.geometry import box
-from shapely.geometry.base import BaseGeometry
-
-# import processing
-
-# from rasterio.crs import CRS
-
-
-WORK_DIR = os.path.join(user_cache_dir("accessmod"), "elevation")
-# DATA_PATH = os.path.join(workspace.files_path, "pipelines/accessmod/elevation/data")
-DATA_PATH = "tmp/accessmod/elevation/data"
+import rasterio.mask
 
 RASTERIO_DEFAULT_PROFILE = {
     "driver": "GTiff",
@@ -44,26 +37,87 @@ GDAL_CREATION_OPTIONS = [
 
 
 @pipeline("landcover")
-def generate_land_cover(target_geometry):
+@parameter(
+    "boundaries_file",
+    name="Boundaries input file path",   # To update later
+    help="Input fileof geometry of interest (should be located in Files).",
+    type=str,
+    required=True,
+    multiple=False
+)
+@parameter(
+    "output_path",
+    name="Output file path",
+    help="Output raster path in the workspace (parent directory will automatically be created).",
+    type=str,
+    required=False,
+    multiple=False
+)
+def generate_land_cover_raster(
+    boundaries_file: str, 
+    output_path: str):
 
-    os.makedirs(WORK_DIR, exist_ok=True)
+    """Extract, merge and crop elevation data from Copernicus, according the area of interest.
+    In addition, the slope is computed, and the final raster is saved a .tif file.
+    """
+    
+    # Get boundaries
+    boundaries = read_boundaries(boundaries_file)
 
-    # Get tiles
-    tiles_name = retrieve_tiles(target_geom=target_geometry)
+    # Retrieves tiles
+    tiles_name, geom_of_interest = retrieve_tiles(target_geom=boundaries)
 
-    if not os.path.exists(DATA_PATH):
-        os.makedirs(DATA_PATH)
+    # 
+    if output_path:
+        dst_file = Path(workspace.files_path) / output_path
+        dst_file.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        dst_dir = Path(workspace.files_path) / "pipelines" / "accessmod"
+        dst_dir /= datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        dst_dir.mkdir(parents=True, exist_ok=True)
 
-    # Download data 
-    tiles = download_tiles(name_list=tiles_name, output_path=DATA_PATH)
+    # Use tempfile library here ⬇️⬇
+    with tempfile.TemporaryDirectory(prefix="accessmod_") as tmpdirname:
 
-    # Merge tiles 
-    mosaic = merge_tiles(tiles=tiles, output_file=DATA_PATH + "Copernicus_elevation_merge.tif")
+        tmpdirname = tmpdirname + "/"
 
-    # Compute slope
-    slope = compute_slope(input_file=mosaic, output_file=DATA_PATH + "copernicus_elevation_slope.tif")
+        current_run.log_info(f"Temporary directory created at: {tmpdirname}")
 
-    # Add cleaning steps -> remove raw and intermediate files from the output folder even if it's in tmp ??
+        # Download data 
+        tiles = download_tiles(name_list=tiles_name, output_path=tmpdirname)
+
+        # Check presence of files in tempory folder
+        if len(os.listdir(tmpdirname)) == 0:
+            return FileNotFoundError(f"No elevation tile found at {tmpdirname}")
+
+        # Merge tiles 
+        mosaic = merge_tiles(tiles=tiles, output_file=tmpdirname + "elevation_tiles_merged.tif")
+
+        # Compute slope
+        slope = compute_slope(input_file=mosaic, output_file=tmpdirname + "elevation_slope.tif")
+
+        # Crop with buffer 
+        cropped_raster = crop_with_buffer(geom_of_interest, input_file=slope, output_file=output_path)
+
+        current_run.add_file_output(cropped_raster, str(dst_dir) + "elevation.tif")
+
+
+#########################
+def read_boundaries(file_path: str) -> gpd.GeoDataFrame:
+    
+    if not os.path.exists(file_path):
+        msg = f"File {file_path} not found in Files"
+        # current_run.log_error(msg)
+        raise FileNotFoundError(msg)
+
+    suffixes = (".gpkg", ".parquet", ".geojson", ".shp")
+    if not file_path.endswith(suffixes):
+        raise NameError("File not in a correct format. Import it as .gpkg, .parquet, .geojson or .shp.")
+
+    if file_path.endswith(".parquet"):
+        return gpd.read_parquet(file_path)
+
+    return gpd.read_file(file_path)
 
 
 #########################
@@ -72,7 +126,7 @@ def create_global_grid_name(latitude_spacing: int, longitude_spacing: int, patte
     tiles = []
     for lat in range(-90, 90, latitude_spacing):
         for lon in range(-180, 180, longitude_spacing):
-            geom = box(lon, lat, lon+longitude_spacing, lat+latitude_spacing)
+            geom = box(lon, lat, lon + longitude_spacing, lat + latitude_spacing)
     
             NS = "N" if lat >= 0 else "S"
             EW = "E" if lon >= 0 else "W"
@@ -85,10 +139,10 @@ def create_global_grid_name(latitude_spacing: int, longitude_spacing: int, patte
 
 
 #########################
-def retrieve_tiles(target_geom: BaseGeometry) -> List[str]:
+def retrieve_tiles(target_geom: gpd.GeoDataFrame) -> List[str]:
     
     if target_geom.crs != "EPSG:4326":
-        target_geom.to_crs(4326)
+        target_geom.to_crs("EPSG:4326")
 
     # Create a global grid    
     pattern_name = "Copernicus_DSM_COG_10_{meridional}{lat:02d}_00_{zonal}{long:03d}_00_DEM"
@@ -103,13 +157,13 @@ def retrieve_tiles(target_geom: BaseGeometry) -> List[str]:
 #########################
 def download_tiles(name_list: List[str], output_path: str):
 
-    s3 = boto3.client('s3', region_name="eu-central-1", config=Config(signature_version=UNSIGNED))
+    s3 = boto3.client("s3", region_name="eu-central-1", config=Config(signature_version=UNSIGNED))
 
     for name in name_list:
-        output_file = name + '.tif'
-        s3.download_file('copernicus-dem-30m', f"{name}/{name}.tif", output_path + output_file)
+        output_file = name + ".tif"
+        s3.download_file("copernicus-dem-30m", f"{name}/{name}.tif", output_path + output_file)
 
-    return name_list
+    return [output_path + file_name + ".tif" for file_name in name_list]
 
 
 #########################
@@ -151,4 +205,23 @@ def compute_slope(input_file: str, output_file: str) -> str:
     return output_file
 
 
+def crop_with_buffer(geom: gpd.GeoDataFrame, input_raster: str, output_raster: str) -> str:
 
+    # Add a buffer to the geometry of interest
+    geom_buffured = geom.to_crs("EPSG:4326").geometry.buffer(0.2)
+
+    # Crop the input raster
+    with rasterio.open(input_raster) as src:
+    
+        profile = src.profile
+        out_image, out_transform = rasterio.mask.mask(src, geom_buffured.geometry, crop=False)
+    
+    # Save
+    with rasterio.open(output_raster, "w", **profile) as dst:
+        dst.write(out_image[0], 1)
+
+    return output_raster
+
+
+if __name__ == "__main__":
+    generate_land_cover_raster()
