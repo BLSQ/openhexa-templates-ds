@@ -36,7 +36,7 @@ GDAL_CREATION_OPTIONS = [
 ]
 
 
-@pipeline("landcover")
+@pipeline("elevation")
 @parameter(
     "boundaries_file",
     name="Boundaries input file path",   # To update later
@@ -53,7 +53,7 @@ GDAL_CREATION_OPTIONS = [
     required=False,
     multiple=False
 )
-def generate_land_cover_raster(
+def generate_elevation_raster(
     boundaries_file: str, 
     output_path: str):
 
@@ -76,7 +76,6 @@ def generate_land_cover_raster(
         dst_dir /= datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         dst_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use tempfile library here ⬇️⬇
     with tempfile.TemporaryDirectory(prefix="accessmod_") as tmpdirname:
 
         tmpdirname = tmpdirname + "/"
@@ -91,13 +90,19 @@ def generate_land_cover_raster(
             return FileNotFoundError(f"No elevation tile found at {tmpdirname}")
 
         # Merge tiles 
+        current_run.log_info("⚙️ Tiles merging in progress.")
         mosaic = merge_tiles(tiles=tiles, output_file=tmpdirname + "elevation_tiles_merged.tif")
+        current_run.log_info("✅ Tiles merged successfully.")
 
         # Compute slope
+        current_run.log_info("⚙️ Slope computation in progress")
         slope = compute_slope(input_file=mosaic, output_file=tmpdirname + "elevation_slope.tif")
+        current_run.log_info("✅ Slope computed successfully.")
 
-        # Crop with buffer 
+        # Crop with buffer
+        current_run.log_info("⚙️ Crop slope raster with buffer in progress")
         cropped_raster = crop_with_buffer(geom_of_interest, input_file=slope, output_file=output_path)
+        current_run.log_info(f"✅ Crop done successfully and final raster available at {output_path}!")
 
         current_run.add_file_output(cropped_raster, str(dst_dir) + "elevation.tif")
 
@@ -224,4 +229,4 @@ def crop_with_buffer(geom: gpd.GeoDataFrame, input_raster: str, output_raster: s
 
 
 if __name__ == "__main__":
-    generate_land_cover_raster()
+    generate_elevation_raster()
