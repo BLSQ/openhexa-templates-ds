@@ -6,10 +6,6 @@ from shapely.geometry import shape
 
 from dhis2_shapes_extract.pipeline import transform_shapes
 
-# import sys
-# sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-# from pipeline import transform_shapes
-
 """
 We only test the core geometry transformations functionality.
 """
