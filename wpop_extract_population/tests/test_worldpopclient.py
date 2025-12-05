@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from worlpopclient import WorldPopClient  # Update import to your actual module
+from worlpopclient import WorldPopClient
 
 # --------------------------------------------------------------------------------------
 # Tests for target_tif_filename
