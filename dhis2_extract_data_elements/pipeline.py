@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,31 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 from validate import validate_data
+
+logger = logging.getLogger(__name__)
+
+
+class LocalRun:
+    """Mock current_run for local executions."""
+
+    def log_info(self, msg: str) -> None:
+        """Mock current_run.log_info()."""
+        logger.info(msg)
+
+    def log_warning(self, msg: str) -> None:
+        """Mock current_run.log_warning()."""
+        logger.warning(msg)
+
+    def log_error(self, msg: str) -> None:
+        """Mock current_run.log_error()."""
+        logger.error(msg)
+
+    def add_file_output(self, fp: str) -> None:
+        """Mock current_run.add_file_output()."""
+        logger.info(f"File output added: {fp}")
+
+
+run = current_run or LocalRun()
 
 
 @pipeline("dhis2-extract-data-elements")
@@ -130,23 +156,23 @@ def dhis2_extract_data_elements(
 
     check_server_health(dhis2)
 
-    current_run.log_info("Reading metadata from source DHIS2 instance")
+    run.log_info("Reading metadata from source DHIS2 instance")
     src_data_elements = get_data_elements(dhis2)
     src_organisation_units = get_organisation_units(dhis2)
     src_organisation_unit_groups = get_organisation_unit_groups(dhis2)
     src_category_option_combos = get_category_option_combos(dhis2)
-    current_run.log_info("Sucessfully read metadata from source DHIS2 instance")
+    run.log_info("Sucessfully read metadata from source DHIS2 instance")
 
-    current_run.log_info("Checking data request")
+    run.log_info("Checking data request")
 
     if not end_date:
         end_date = datetime.now().strftime("%Y-%m-%d")
-        current_run.log_info(f"End date not provided, using {end_date}")
+        run.log_info(f"End date not provided, using {end_date}")
 
     where = organisation_units or organisation_unit_groups
     if not where:
         msg = "No organisation units or organisation unit groups provided"
-        current_run.log_error(msg)
+        run.log_error(msg)
         raise ValueError(msg)
 
     if data_elements:
@@ -170,16 +196,14 @@ def dhis2_extract_data_elements(
             object_type="Organisation unit group",
         )
 
-    current_run.log_info("Starting data extraction")
+    run.log_info("Starting data extraction")
 
     if data_elements:
         data_values = extract_data_elements(
             dhis2=dhis2,
             data_elements=data_elements,
             org_units=organisation_units if organisation_units else None,
-            org_unit_groups=(
-                organisation_unit_groups if organisation_unit_groups else None
-            ),
+            org_unit_groups=(organisation_unit_groups if organisation_unit_groups else None),
             include_children=include_children,
             start_date=datetime.fromisoformat(start_date),
             end_date=datetime.fromisoformat(end_date),
@@ -190,9 +214,7 @@ def dhis2_extract_data_elements(
             dhis2=dhis2,
             data_element_groups=data_element_groups,
             org_units=organisation_units if organisation_units else None,
-            org_unit_groups=(
-                organisation_unit_groups if organisation_unit_groups else None
-            ),
+            org_unit_groups=(organisation_unit_groups if organisation_unit_groups else None),
             include_children=include_children,
             start_date=datetime.fromisoformat(start_date),
             end_date=datetime.fromisoformat(end_date),
@@ -200,19 +222,19 @@ def dhis2_extract_data_elements(
 
     else:
         msg = "No data elements or data element groups provided"
-        current_run.log_error(msg)
+        run.log_error(msg)
         raise ValueError(msg)
 
-    current_run.log_info(f"Extracted {len(data_values)} data values")
+    run.log_info(f"Extracted {len(data_values)} data values")
 
-    current_run.log_info("Joining object names to output data")
+    run.log_info("Joining object names to output data")
     data_values = join_object_names(
         df=data_values,
         data_elements=src_data_elements,
         organisation_units=src_organisation_units,
         category_option_combos=src_category_option_combos,
     )
-    current_run.log_info("Sucessfully joined object names to output data")
+    run.log_info("Sucessfully joined object names to output data")
 
     if dst_file:
         dst_file = Path(workspace.files_path) / dst_file
@@ -222,10 +244,10 @@ def dhis2_extract_data_elements(
 
     validate_data(data_values)
 
-    current_run.log_info(f"Writing data to {dst_file}")
+    run.log_info(f"Writing data to {dst_file}")
     data_values.write_parquet(dst_file)
-    current_run.add_file_output(dst_file.as_posix())
-    current_run.log_info(f"Data written to {dst_file}")
+    run.add_file_output(dst_file.as_posix())
+    run.log_info(f"Data written to {dst_file}")
 
     if dst_dataset:
         write_to_dataset(fp=dst_file, dataset=dst_dataset)
@@ -273,7 +295,7 @@ def check_server_health(dhis2: DHIS2):
     try:
         dhis2.ping()
     except ConnectionError:
-        current_run.log_error(f"Unable to reach DHIS2 instance at url {dhis2.api.url}")
+        run.log_error(f"Unable to reach DHIS2 instance at url {dhis2.api.url}")
         raise
 
 
@@ -301,7 +323,7 @@ def filter_objects(
     for obj in objects_in_request:
         if obj not in objects_in_dhis2:
             msg = f"{object_type} '{obj}' not found in source DHIS2 instance"
-            current_run.log_warning(msg)
+            run.log_warning(msg)
         else:
             filtered_objects.append(obj)
 
@@ -320,9 +342,7 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     """
     if dataset.latest_version is not None:
         if in_dataset_version(file=fp, dataset_version=dataset.latest_version):
-            current_run.log_info(
-                "File is already in the dataset and no changes have been detected"
-            )
+            run.log_info("File is already in the dataset and no changes have been detected")
             return
 
     # increment dataset version name and create the new dataset version
@@ -334,9 +354,7 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     dataset_version = dataset.create_version(name=f"v{version_number}")
 
     dataset_version.add_file(fp, "data_values.parquet")
-    current_run.log_info(
-        f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}"
-    )
+    run.log_info(f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}")
 
 
 def md5_from_url(url: str) -> str:
@@ -425,4 +443,4 @@ def write_to_db(df: pl.DataFrame, table_name: str) -> None:
         connection=workspace.database_url,
         if_table_exists="replace",
     )
-    current_run.log_info(f"Data written to DB table {table_name}")
+    run.log_info(f"Data written to DB table {table_name}")
