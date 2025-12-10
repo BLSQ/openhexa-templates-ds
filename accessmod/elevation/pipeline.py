@@ -1,4 +1,3 @@
-import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -6,15 +5,16 @@ from typing import List
 
 import boto3
 import geopandas as gpd
+import numpy as np
 import rasterio
 import rasterio.merge
-
 from botocore import UNSIGNED
 from botocore.config import Config
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from osgeo import gdal
+from rasterio.features import geometry_mask
+from rasterio.windows import Window, subdivide
 from shapely.geometry import box
-import rasterio.mask
 
 RASTERIO_DEFAULT_PROFILE = {
     "driver": "GTiff",
@@ -53,13 +53,14 @@ GDAL_CREATION_OPTIONS = [
     required=False,
     multiple=False
 )
-def generate_elevation_raster(
-    boundaries_file: str, 
-    output_path: str):
-    """Extract, merge and crop elevation data from Copernicus, according the area of interest.
+def generate_elevation_raster(boundaries_file: str, output_path: str):
+
+    """
+    Extract, merge and crop elevation data from Copernicus, according the area of interest.
     In addition, the slope is computed, and the final raster is saved a .tif file.
     """
-    # Get boundaries
+
+    # Load boundary
     boundaries = read_boundaries(boundaries_file)
 
     # Retrieves tiles
@@ -68,6 +69,7 @@ def generate_elevation_raster(
     if not tiles_name:
         raise RuntimeError("💥 No Copernicus tile intersects the input geometry.")
 
+    # Prepare output fie path
     if output_path:
         dst_file = Path(workspace.files_path) / output_path
         dst_file.parent.mkdir(parents=True, exist_ok=True)
@@ -77,48 +79,60 @@ def generate_elevation_raster(
         dst_dir.mkdir(parents=True, exist_ok=True)
         dst_file = dst_dir / "elevation.tif"
 
+    current_run.log_info(f"Output raster path defined: {dst_file}")
+
     with tempfile.TemporaryDirectory(prefix="accessmod_") as tmpdirname:
 
-        tmpdirname = tmpdirname + "/"
-
+        tmpdir = Path(tmpdirname)
         current_run.log_info(f"Temporary directory created at: {tmpdirname}")
 
         # Download data 
-        tiles = download_tiles(name_list=tiles_name, output_path=tmpdirname)
+        current_run.log_info(f"Starting download of {len(tiles_name)} tiles to temporary folder {tmpdir}...")
+        tiles = download_tiles(name_list=tiles_name, 
+                               output_path=tmpdir)
 
-        # Check presence of files in tempory folder
-        if not os.listdir(tmpdirname):
-            raise FileNotFoundError(f"💥 No elevation tile found at {tmpdirname}")
+        if not tiles:
+            raise FileNotFoundError(f"💥 No tile found at {tmpdir}")
 
         # Merge tiles 
-        current_run.log_info("⚙️ Tiles merging in progress.")
-        mosaic = merge_tiles(tiles=tiles, output_file=tmpdirname + "elevation_tiles_merged.tif")
+        current_run.log_info("Merging tiles into mosaic...")
+        mosaic, mosaic_meta = merge_tiles(tiles=tiles, 
+                                          output_file=tmpdirname + "elevation_tiles_merged.tif")
 
         if not Path(mosaic).exists():
             raise RuntimeError("💥 Mosaic generation failed")
-        current_run.log_info("✅ Tiles merged successfully.")
 
         # Compute slope
-        current_run.log_info("⚙️ Slope computation in progress")
-        slope = compute_slope(input_file=mosaic, output_file=tmpdirname + "elevation_slope.tif")
-        current_run.log_info("✅ Slope computed successfully.")
-
+        current_run.log_info("Calculating slope...")
+        slope = compute_slope(input_file=mosaic, 
+                              output_file=tmpdirname + "elevation_slope.tif")
+        
+        if not Path(slope).exists():
+            raise RuntimeError("💥 Slope calculations failed")
+        
         # Crop with buffer
-        current_run.log_info("⚙️ Crop slope raster with buffer in progress")
-        cropped_raster = crop_with_buffer(boundaries, input_raster=slope, output_raster=str(dst_file))
+        current_run.log_info("Cropping raster to boundaries with buffer...")
+        cropped_raster = crop_with_buffer(geom=boundaries, 
+                                          input_raster=slope, 
+                                          input_meta=mosaic_meta, 
+                                          output_raster=str(dst_file))
+        
         if not dst_file.exists():
             raise RuntimeError("💥 Final raster was not created.")
-        current_run.log_info(f"✅ Crop done successfully and final raster saved at {cropped_raster} !")
-        current_run.log_info(f"Final raster size: {dst_file.stat().st_size / 1e6:.2f} MB")
-        
+        current_run.log_info(f"Final raster saved at: {dst_file} ({dst_file.stat().st_size / 1e6:.2f} MB)")
+
+        current_run.log_info("🎉 Extraction of elevation data finished successfully!")
         current_run.add_file_output(cropped_raster)
 
 
 #########################
 def read_boundaries(file_path: str) -> gpd.GeoDataFrame:
+
+    """Load boundary from a supported file format."""
     
-    if not os.path.exists(file_path):
-        msg = f"💥 File {file_path} not found in Files"
+    path = Path(file_path)
+    if not path.exists():
+        msg = f"File {file_path} not found in Files"
         current_run.log_error(msg)
         raise FileNotFoundError(msg)
 
@@ -134,6 +148,8 @@ def read_boundaries(file_path: str) -> gpd.GeoDataFrame:
 
 #########################
 def create_global_grid_name(latitude_spacing: int, longitude_spacing: int, pattern: str) -> gpd.GeoDataFrame:
+
+    """Create a global grid with tiles named according to a pattern."""
     
     tiles = []
     for lat in range(-90, 90, latitude_spacing):
@@ -152,6 +168,8 @@ def create_global_grid_name(latitude_spacing: int, longitude_spacing: int, patte
 
 #########################
 def retrieve_tiles(target_geom: gpd.GeoDataFrame) -> List[str]:
+
+    """Return a list of tile names that intersect the target geometry."""
     
     if target_geom.crs != "EPSG:4326":
         target_geom = target_geom.to_crs("EPSG:4326")
@@ -168,6 +186,8 @@ def retrieve_tiles(target_geom: gpd.GeoDataFrame) -> List[str]:
 
 #########################
 def download_tiles(name_list: List[str], output_path: str):
+
+    """Download tiles from ESA S3 bucket into the specified directory."""
 
     s3 = boto3.client("s3", region_name="eu-central-1", config=Config(signature_version=UNSIGNED))
 
@@ -196,7 +216,9 @@ def download_tiles(name_list: List[str], output_path: str):
 
 
 #########################
-def merge_tiles(tiles: List[str], output_file: str) -> str:
+def merge_tiles(tiles: List[str], output_file: str) -> (str, str):
+
+    """Merge single-band raster tiles into a single mosaic raster."""
 
     with rasterio.open(tiles[0]) as src:
         meta = src.meta.copy()
@@ -219,11 +241,13 @@ def merge_tiles(tiles: List[str], output_file: str) -> str:
         f"({meta['width']} x {meta['height']})"
     )
 
-    return output_file
+    return output_file, meta
 
 
 #########################
 def compute_slope(input_file: str, output_file: str) -> str:
+
+    """Compute slope with GDAL"""
 
     src_ds = gdal.Open(input_file)
     if src_ds is None:
@@ -251,30 +275,39 @@ def compute_slope(input_file: str, output_file: str) -> str:
     return output_file
 
 
-def crop_with_buffer(geom: gpd.GeoDataFrame, input_raster: str, output_raster: str) -> str:
+def crop_with_buffer(geom: gpd.GeoDataFrame, input_raster: str, input_meta: str, output_raster: str) -> str:
+
+    """Crop a raster with a buffer around the geometry and save to output path."""
 
     # Add a buffer to the geometry of interest (in degrees)
-    # 🚧 To avoid too large buffers in longitude at equator: 
-    # maybe project into 3857, compute the buffer in meters, and reproject back into 4326 
     geom_buffured = geom.to_crs("EPSG:4326").geometry.buffer(0.2)
+
+    # Windows generation
+    input_window = Window(0, 0, input_meta["width"], input_meta["height"])
+    sub_windows = subdivide(input_window, input_meta["width"] / 8, input_meta["width"] / 8)
 
     # Crop the input raster
     with rasterio.open(input_raster) as src:
-        out_image, out_transform = rasterio.mask.mask(src, geom_buffured.geometry, crop=True)
-        profile = src.profile.copy()
 
-    profile.update({
-        "height": out_image.shape[1],
-        "width": out_image.shape[2],
-        "transform": out_transform,
-        "count": 1
-    })
-    
-    with rasterio.open(output_raster, "w", **profile) as dst:
-        dst.write(out_image[0], 1)
+        nodata = src.nodata
+
+        with rasterio.open(output_raster, "w", **input_meta) as dst:
+
+            for window in sub_windows:
+
+                data = src.read(1, window=window)
+                window_transform = src.window_transform(window)
+                mask = geometry_mask(geometries=geom_buffured.geometry, 
+                                     out_shape=data.shape, 
+                                     transform=window_transform, 
+                                     invert=True)  # inside geom
+                out_image = np.where(mask, data, nodata)
+
+                dst.write(out_image, 1, window=window)
 
     return output_raster
 
 
+#########################
 if __name__ == "__main__":
     generate_elevation_raster()
