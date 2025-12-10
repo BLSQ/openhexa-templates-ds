@@ -5,12 +5,13 @@ from typing import List
 
 import boto3
 import geopandas as gpd
-import rasterio
-import rasterio.mask
+import numpy as np
 import rasterio.merge
 from botocore import UNSIGNED
 from botocore.config import Config
 from openhexa.sdk import current_run, parameter, pipeline, workspace
+from rasterio.features import geometry_mask
+from rasterio.windows import Window, subdivide
 from shapely.geometry import box
 
 RASTERIO_DEFAULT_PROFILE = {
@@ -63,7 +64,9 @@ def generate_landcover_raster(boundaries_file: str, output_path: str):
         dst_dir.mkdir(parents=True, exist_ok=True)
         dst_file = dst_dir / "landcover.tif"
 
-    with tempfile.TemporaryDirectory(prefix="accessmod_landcover_") as tmpdirname:
+    current_run.log_info(f"Output raster path defined: {dst_file}")
+
+    with tempfile.TemporaryDirectory(prefix="accessmod_landcover_", delete=False) as tmpdirname:
 
         tmpdir = Path(tmpdirname)
         current_run.log_info(f"Temporary directory created at: {tmpdir}")
@@ -77,22 +80,25 @@ def generate_landcover_raster(boundaries_file: str, output_path: str):
 
         # Merge tiles 
         current_run.log_info("Merging tiles into mosaic...")
-        mosaic = merge_tiles(tiles=tiles, 
-                             output_file=tmpdir / "landcover_tiles_merged.tif")
+        mosaic, mosaic_meta = merge_tiles(tiles=tiles, 
+                                          output_file=tmpdir / "landcover_tiles_merged.tif")
         if not Path(mosaic).exists():
             raise RuntimeError("💥 Mosaic generation failed")
 
         # Crop with buffer 
         current_run.log_info("Cropping raster to boundaries with buffer...")
-        cropped_raster = crop_with_buffer(geom=boundaries, 
-                                          input_raster=mosaic, 
+
+        cropped_raster = crop_with_buffer(geom=boundaries,
+                                          input_raster=mosaic,
+                                          input_meta=mosaic_meta, 
                                           output_raster=dst_file)
+
         if not dst_file.exists():
             raise RuntimeError("💥 Final raster was not created.")
         current_run.log_info("Raster successfully cropped!")
         current_run.log_info(f"Final raster saved at: {dst_file} ({dst_file.stat().st_size / 1e6:.2f} MB)")
+
         current_run.log_info("🎉 Extraction of landcover data finished successfully!")
-        
         current_run.add_file_output(cropped_raster)
 
 
@@ -188,7 +194,7 @@ def download_tiles(name_list: List[str], output_path: Path) -> List[str]:
 
 
 #########################
-def merge_tiles(tiles: List[str], output_file: Path) -> str:
+def merge_tiles(tiles: List[str], output_file: Path) -> (str, str):
 
     """Merge single-band raster tiles into a single mosaic raster."""
 
@@ -213,34 +219,42 @@ def merge_tiles(tiles: List[str], output_file: Path) -> str:
         f"({meta['width']} x {meta['height']})"
     )
 
-    return str(output_file)
+    return str(output_file), meta
 
 
 #########################
-def crop_with_buffer(geom: gpd.GeoDataFrame, input_raster: str, output_raster: Path) -> str:
+def crop_with_buffer(geom: gpd.GeoDataFrame, input_raster: str, input_meta: str, output_raster: Path) -> str:
 
-    """Crop a raster with an optional buffer around the geometry and save to output path."""
+    """Crop a raster with a buffer around the geometry and save to output path."""
 
     # Add a buffer to the geometry of interest
     geom_buffured = geom.to_crs("EPSG:4326").geometry.buffer(0.2)
 
+    # Windows generation
+    input_window = Window(0, 0, input_meta["width"], input_meta["height"])
+    sub_windows = subdivide(input_window, input_meta["width"] / 8, input_meta["width"] / 8)
+
     # Crop the input raster
     with rasterio.open(input_raster) as src:
-        out_image, out_transform = rasterio.mask.mask(src, geom_buffured.geometry, crop=True)
-        profile = src.profile.copy()
-    
-    profile.update({
-        "height": out_image.shape[1],
-        "width": out_image.shape[2],
-        "transform": out_transform,
-        "count": 1
-    })
-    
-    # Save
-    with rasterio.open(output_raster, "w", **profile) as dst:
-        dst.write(out_image[0], 1)
+
+        nodata = src.nodata
+
+        with rasterio.open(output_raster, "w", **input_meta) as dst:
+
+            for window in sub_windows:
+
+                data = src.read(1, window=window)
+                window_transform = src.window_transform(window)
+                mask = geometry_mask(geometries=geom_buffured.geometry, 
+                                     out_shape=data.shape, 
+                                     transform=window_transform, 
+                                     invert=True)  # inside geom
+                out_image = np.where(mask, data, nodata)
+
+                dst.write(out_image, 1, window=window)
 
     return str(output_raster)
+
 
 #########################
 if __name__ == "__main__":
