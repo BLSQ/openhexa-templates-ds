@@ -151,6 +151,16 @@ def dhis2_extract_data_elements(
     dst_table: str | None = None,
 ) -> None:
     """Extract data elements from a DHIS2 instance and save them to a parquet file."""
+    # openhexa parameters return empty lists if not provided, we want None instead
+    if not data_elements:
+        data_elements = None
+    if not data_element_groups:
+        data_element_groups = None
+    if not organisation_units:
+        organisation_units = None
+    if not organisation_unit_groups:
+        organisation_unit_groups = None
+
     params = RequestParams(
         data_elements=data_elements,
         data_element_groups=data_element_groups,
