@@ -81,7 +81,7 @@ def test_geometries_polygons_and_nulls_transform():
     assert isinstance(shapes["geometry"].dtype, gpd.array.GeometryDtype), (
         "geometry column has wrong dtype"
     )
-    assert shapes.geometry.isnull().sum() == 2, "there should be 5 null geometries"
+    assert shapes.geometry.isnull().sum() == 2, "there should be 2 null geometries"
 
 
 def test_null_geometries_transform():
@@ -107,7 +107,7 @@ def test_null_geometries_transform():
 
 
 def test_invalid_geometries_transform():
-    """Test transformation of null geometries."""
+    """Test transformation of invalid geometries."""
     valid_polygon = json.dumps(
         {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}
     )
