@@ -488,7 +488,7 @@ def run_spatial_aggregation(tif_file_path: Path, boundaries_path: Path, output_d
     result_pd = result_pd[col_selection + ["population", "pixel_count"]]  # Filter columns
 
     # Log any administrative levels with no population data
-    no_data = result_pd[result_pd["POPULATION"] == 0]
+    no_data = result_pd[result_pd["population"] == 0]
     if not no_data.empty:
         for _, row in no_data.iterrows():
             row_str = ", ".join(f"{col}={val}" for col, val in row.items())
