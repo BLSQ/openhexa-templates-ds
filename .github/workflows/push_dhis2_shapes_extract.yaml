@@ -1,4 +1,4 @@
-name: Push dhis2_shapes_extract pipeline
+name: Push dhis2_shapes_extract
 
 on:
   push:
