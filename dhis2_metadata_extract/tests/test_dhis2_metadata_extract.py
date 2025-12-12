@@ -40,7 +40,7 @@ For simplicity, these tests use hardcoded dataframe samples defined in the testi
 
 def test_format_organisation_units():  # noqa: D103
     org_units_df = get_sample_org_units_df()
-    org_units_formatted = format_organisation_units(org_units_df)
+    org_units_formatted = format_organisation_units(org_units_df, 4)
     assert org_units_df.shape == (3, 14), "Expected 3 rows and 14 columns"
     assert org_units_formatted.shape == (1, 8), "Expected 1 row and 8 columns after formatting"
     validate_data(org_units_formatted, org_units_expected_columns[0:8], data_name="org_units")
