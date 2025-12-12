@@ -166,7 +166,6 @@ def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
         raise Exception(f"Error while connecting to {dhis2_connection.url} error: {e}") from e
 
 
-# @dhis2_metadata_extract.task
 def retrieve_org_units(
     dhis2_client: DHIS2,
     output_path: Path,
@@ -188,15 +187,36 @@ def retrieve_org_units(
         try:
             org_units = get_organisation_units(dhis2_client)
             max_level = org_units.select(pl.col("level").max()).item()
-            org_units = org_units.filter(pl.col("level") == max_level).drop(
-                ["id", "name", "level", "opening_date", "closed_date", "geometry"]
+            org_units_formatted = format_organisation_units(org_units, max_level)
+            validate_data(
+                org_units_formatted, org_units_expected_columns[0:max_level], data_name="org_units"
             )
-            validate_data(org_units, org_units_expected_columns, data_name="org_units")
             filename = f"org_units_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
-            save_file(df=org_units, output_path=output_path, filename=filename)
+            save_file(df=org_units_formatted, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving organisation units: {e}") from e
         current_run.log_info(f"Organisation units saved under: {output_path / filename}")
+        current_run.add_file_output((output_path / filename).as_posix())
+
+
+def format_organisation_units(org_units: pl.DataFrame, max_level: int = 1) -> pl.DataFrame:
+    """Filter organisation units to only those at the maximum level and drop specific columns.
+
+    Parameters
+    ----------
+    org_units : pl.DataFrame
+        The DataFrame containing organisation units.
+    max_level : int, optional
+        The maximum level of organisation units to retain (default is 1).
+
+    Returns
+    -------
+    pl.DataFrame
+        A DataFrame filtered to the maximum level and with selected columns dropped.
+    """
+    return org_units.filter(pl.col("level") == max_level).drop(
+        ["id", "name", "level", "opening_date", "closed_date", "geometry"]
+    )
 
 
 def retrieve_org_unit_groups(
@@ -224,20 +244,36 @@ def retrieve_org_unit_groups(
         current_run.log_info("Retrieving organisation unit groups")
         try:
             org_unit_groups = get_organisation_unit_groups(dhis2_client)
-            org_unit_groups = org_unit_groups.with_columns(
-                [pl.col("organisation_units").list.join(",").alias("organisation_units")]
-            )
-
+            org_unit_groups_formatted = format_organisation_units_groups(org_unit_groups)
             validate_data(
-                org_unit_groups,
+                org_unit_groups_formatted,
                 org_unit_groups_expected_columns,
-                data_name="org_unit_groups"
-                )
+                data_name="org_unit_groups",
+            )
             filename = f"org_units_groups_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
-            save_file(df=org_unit_groups, output_path=output_path, filename=filename)
+            save_file(df=org_unit_groups_formatted, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving organisation unit groups: {e}") from e
         current_run.log_info(f"Organisation units saved under: {output_path / filename}")
+        current_run.add_file_output((output_path / filename).as_posix())
+
+
+def format_organisation_units_groups(org_unit_groups: pl.DataFrame) -> pl.DataFrame:
+    """Format organisation unit groups by dropping specific columns.
+
+    Parameters
+    ----------
+    org_unit_groups : pl.DataFrame
+        The DataFrame containing organisation unit groups.
+
+    Returns
+    -------
+    pl.DataFrame
+        A DataFrame with selected columns dropped.
+    """
+    return org_unit_groups.with_columns(
+        [pl.col("organisation_units").list.join(",").alias("organisation_units")]
+    )
 
 
 def retrieve_datasets(
@@ -265,24 +301,38 @@ def retrieve_datasets(
         current_run.log_info("Retrieving datasets")
         try:
             datasets = get_datasets(dhis2_client)
-            datasets = datasets.with_columns(
-                [
-                    pl.col("organisation_units").list.join(",").alias("organisation_units"),
-                    pl.col("data_elements").list.join(",").alias("data_elements"),
-                    pl.col("indicators").list.join(",").alias("indicators"),
-                ]
-            )
-
+            datasets_formatted = format_datasets(datasets)
             validate_data(
-                datasets,
-                retrieved_datasets_expected_columns,
-                data_name="datasets"
-                )
+                datasets_formatted, retrieved_datasets_expected_columns, data_name="datasets"
+            )
             filename = f"datasets_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
-            save_file(df=datasets, output_path=output_path, filename=filename)
+            save_file(df=datasets_formatted, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving datasets: {e}") from e
         current_run.log_info(f"Datasets saved under: {output_path / filename}")
+        current_run.add_file_output((output_path / filename).as_posix())
+
+
+def format_datasets(datasets: pl.DataFrame) -> pl.DataFrame:
+    """Format datasets by dropping specific columns.
+
+    Parameters
+    ----------
+    datasets : pl.DataFrame
+        The DataFrame containing datasets.
+
+    Returns
+    -------
+    pl.DataFrame
+        A DataFrame with selected columns dropped.
+    """
+    return datasets.with_columns(
+        [
+            pl.col("organisation_units").list.join(",").alias("organisation_units"),
+            pl.col("data_elements").list.join(",").alias("data_elements"),
+            pl.col("indicators").list.join(",").alias("indicators"),
+        ]
+    )
 
 
 def retrieve_data_elements(dhis2_client: DHIS2, output_path: Path, run: bool = True) -> None:
@@ -306,16 +356,36 @@ def retrieve_data_elements(dhis2_client: DHIS2, output_path: Path, run: bool = T
         current_run.log_info("Retrieving data elements")
         try:
             data_elements = get_data_elements(dhis2_client)
-            filename = f"data_elements_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
+            data_elements_formatted = format_data_elements(data_elements)
             validate_data(
-                data_elements,
+                data_elements_formatted,
                 retrieved_data_elements_expected_columns,
-                data_name="data_elements"
-                )
-            save_file(df=data_elements, output_path=output_path, filename=filename)
+                data_name="data_elements",
+            )
+            filename = f"data_elements_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
+            save_file(df=data_elements_formatted, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving data elements: {e}") from e
         current_run.log_info(f"Data elements saved under: {output_path / filename}")
+        current_run.add_file_output((output_path / filename).as_posix())
+
+
+def format_data_elements(data_elements: pl.DataFrame) -> pl.DataFrame:
+    """Format data elements.
+
+    NOTE: Nothing to transform at the moment.
+
+    Parameters
+    ----------
+    data_elements : pl.DataFrame
+        The DataFrame containing data elements.
+
+    Returns
+    -------
+    pl.DataFrame
+        A DataFrame with selected columns dropped.
+    """
+    return data_elements
 
 
 def retrieve_data_element_groups(dhis2_client: DHIS2, output_path: Path, run: bool = True) -> None:
@@ -339,20 +409,36 @@ def retrieve_data_element_groups(dhis2_client: DHIS2, output_path: Path, run: bo
         current_run.log_info("Retrieving data element groups")
         try:
             data_element_groups = get_data_element_groups(dhis2_client)
-            data_element_groups = data_element_groups.with_columns(
-                [pl.col("data_elements").list.join(",").alias("data_elements")]
-            )
-
+            data_element_groups_formatted = format_data_element_groups(data_element_groups)
             validate_data(
-                data_element_groups,
+                data_element_groups_formatted,
                 retrieved_data_element_groups_expected_columns,
-                data_name="data_element_groups"
-                )
+                data_name="data_element_groups",
+            )
             filename = f"data_element_groups_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
-            save_file(df=data_element_groups, output_path=output_path, filename=filename)
+            save_file(df=data_element_groups_formatted, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving data element groups: {e}") from e
         current_run.log_info(f"Data element groups saved under: {output_path / filename}")
+        current_run.add_file_output((output_path / filename).as_posix())
+
+
+def format_data_element_groups(data_element_groups: pl.DataFrame) -> pl.DataFrame:
+    """Format data element groups by joining the 'data_elements' list into a comma-separated string.
+
+    Parameters
+    ----------
+    data_element_groups : pl.DataFrame
+        The DataFrame containing data element groups.
+
+    Returns
+    -------
+    pl.DataFrame
+        A DataFrame with the 'data_elements' column joined as a comma-separated string.
+    """
+    return data_element_groups.with_columns(
+        [pl.col("data_elements").list.join(",").alias("data_elements")]
+    )
 
 
 def retrieve_category_option_combos(
@@ -378,17 +464,36 @@ def retrieve_category_option_combos(
         current_run.log_info("Retrieving category option combos")
         try:
             categorty_options = get_category_option_combos(dhis2_client)
-
+            categorty_options_formatted = format_category_option_combos(categorty_options)
             validate_data(
-                categorty_options,
+                categorty_options_formatted,
                 retrieved_categorty_options_expected_columns,
-                data_name="categorty_options"
-                )
+                data_name="categorty_options",
+            )
             filename = f"category_option_combos_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
-            save_file(df=categorty_options, output_path=output_path, filename=filename)
+            save_file(df=categorty_options_formatted, output_path=output_path, filename=filename)
         except Exception as e:
             raise Exception(f"Error while retrieving categorty option combos: {e}") from e
         current_run.log_info(f"Category option combos saved under: {output_path / filename}")
+        current_run.add_file_output((output_path / filename).as_posix())
+
+
+def format_category_option_combos(categorty_options: pl.DataFrame) -> pl.DataFrame:
+    """Format category option combos.
+
+    NOTE: Nothing to transform at the moment.
+
+    Parameters
+    ----------
+    categorty_options : pl.DataFrame
+        The DataFrame containing category option combos.
+
+    Returns
+    -------
+    pl.DataFrame
+        A DataFrame with selected columns dropped.
+    """
+    return categorty_options
 
 
 def save_file(df: pl.DataFrame, output_path: Path, filename: str) -> None:
