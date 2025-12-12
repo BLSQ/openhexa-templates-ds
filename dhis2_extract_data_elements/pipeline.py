@@ -397,7 +397,7 @@ def validate_dataframe(data_values: pl.DataFrame) -> pl.DataFrame:
 
 
 @dhis2_extract_data_elements.task
-def write_to_file(data_values: pl.DataFrame, dst_file: Path) -> Path:
+def write_to_file(data_values: pl.DataFrame, dst_file: str) -> Path:
     """Write the data values dataframe to a parquet file.
 
     Args:
@@ -408,11 +408,13 @@ def write_to_file(data_values: pl.DataFrame, dst_file: Path) -> Path:
         Path to the written parquet file.
 
     """
-    run.log_info(f"Writing data to {dst_file}")
-    data_values.write_parquet(dst_file)
-    run.add_file_output(dst_file.as_posix())
-    run.log_info(f"Data written to {dst_file}")
-    return dst_file
+    dst_file_path = Path(workspace.files_path) / dst_file
+    dst_file_path.parent.mkdir(parents=True, exist_ok=True)
+    run.log_info(f"Writing data to {dst_file_path}")
+    data_values.write_parquet(dst_file_path)
+    run.add_file_output(dst_file_path.as_posix())
+    run.log_info(f"Data written to {dst_file_path}")
+    return dst_file_path
 
 
 @dhis2_extract_data_elements.task
