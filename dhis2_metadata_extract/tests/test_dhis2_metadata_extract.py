@@ -70,7 +70,7 @@ def test_format_data_elements():  # noqa: D103
     data_elements = get_sample_data_elements_df()
     data_elements_formatted = format_data_elements(data_elements)
     assert data_elements.shape == (5, 3), "Expected 5 rows and 3 columns"
-    assert data_elements_formatted.shape == (5, 3), "Expected 3 rows and 5 columns after formatting"
+    assert data_elements_formatted.shape == (5, 3), "Expected 5 rows and 3 columns after formatting"
     validate_data(
         data_elements_formatted, retrieved_data_elements_expected_columns, data_name="data_elements"
     )
