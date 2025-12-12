@@ -87,7 +87,8 @@ def fake_boundaries(tmp_path: Path) -> Path:
     return path
 
 
-def test_run_spatial_aggregation_missing_tif(fake_boundaries: Path, tmp_path: Path):
+def test_run_spatial_aggregation_missing_tif(
+        fake_boundaries: Path, tmp_path: Path, mock_current_run: MagicMock):
     """Fixture to create a fake GeoJSON file for boundaries.
 
     Parameters
@@ -96,7 +97,8 @@ def test_run_spatial_aggregation_missing_tif(fake_boundaries: Path, tmp_path: Pa
         Path to fake boundaries GeoJSON.
     tmp_path : Path
         Temporary directory provided by pytest.
-
+    mock_current_run : MagicMock
+        Mocked pipeline current_run object.
     Path
         Path to the saved fake boundaries GeoJSON file.
     """
@@ -105,13 +107,15 @@ def test_run_spatial_aggregation_missing_tif(fake_boundaries: Path, tmp_path: Pa
         run_spatial_aggregation(missing_tif, fake_boundaries, tmp_path)
 
 
-def test_run_spatial_aggregation_missing_boundaries(tmp_path: Path):
+def test_run_spatial_aggregation_missing_boundaries(tmp_path: Path, mock_current_run: MagicMock):
     """Test that the aggregation function raises FileNotFoundError for missing boundaries file.
 
     Parameters
     ----------
     tmp_path : Path
         Temporary directory for the test.
+    mock_current_run : MagicMock
+        Mocked pipeline current_run object.
     """
     tif = tmp_path / "file.tif"
     tif.touch()
