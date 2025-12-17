@@ -1,3 +1,4 @@
+import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -5,24 +6,10 @@ from typing import List
 
 import boto3
 import geopandas as gpd
-import numpy as np
-import rasterio.merge
 from botocore import UNSIGNED
 from botocore.config import Config
 from openhexa.sdk import current_run, parameter, pipeline, workspace
-from rasterio.features import geometry_mask
-from rasterio.windows import Window, subdivide
 from shapely.geometry import box
-
-RASTERIO_DEFAULT_PROFILE = {
-    "driver": "GTiff",
-    "tiled": True,
-    "blockxsize": 256,
-    "blockysize": 256,
-    "compress": "zstd",
-    "predictor": 2,
-    "num_threads": "all_cpus",
-}
 
 
 @pipeline("landcover")
@@ -79,27 +66,18 @@ def generate_landcover_raster(boundaries_file: str, output_path: str):
             raise FileNotFoundError(f"💥 No tiles found at {tmpdir}")
 
         # Merge tiles 
-        current_run.log_info("Merging tiles into mosaic...")
-        mosaic, mosaic_meta = merge_tiles(tiles=tiles, 
-                                          output_file=tmpdir / "landcover_tiles_merged.tif")
+        current_run.log_info("Merging tiles into mosaic and cropping with buffered geometry...")
+        mosaic = merge_crop_tiles(tiles=tiles,
+                                  geom=boundaries,
+                                  tmp_dir=tmpdir,
+                                  output_file=str(dst_file))
         if not Path(mosaic).exists():
             raise RuntimeError("💥 Mosaic generation failed")
-
-        # Crop with buffer 
-        current_run.log_info("Cropping raster to boundaries with buffer...")
-
-        cropped_raster = crop_with_buffer(geom=boundaries,
-                                          input_raster=mosaic,
-                                          input_meta=mosaic_meta, 
-                                          output_raster=dst_file)
-
-        if not dst_file.exists():
-            raise RuntimeError("💥 Final raster was not created.")
-        current_run.log_info("Raster successfully cropped!")
+        
         current_run.log_info(f"Final raster saved at: {dst_file} ({dst_file.stat().st_size / 1e6:.2f} MB)")
 
         current_run.log_info("🎉 Extraction of landcover data finished successfully!")
-        current_run.add_file_output(cropped_raster)
+        current_run.add_file_output(mosaic)
 
 
 #########################
@@ -194,66 +172,34 @@ def download_tiles(name_list: List[str], output_path: Path) -> List[str]:
 
 
 #########################
-def merge_tiles(tiles: List[str], output_file: Path) -> (str, str):
+def merge_crop_tiles(tiles: List[str], geom: gpd.GeoDataFrame, tmp_dir: Path, output_file: str) -> str:
 
-    """Merge single-band raster tiles into a single mosaic raster."""
+    """Merge single-band raster tiles into a single mosaic raster and crop it with the buffured geometry of interest."""
 
-    with rasterio.open(tiles[0]) as src:
-        meta = src.meta.copy()
-        nodata = src.nodata
+    output_geom_buffured = tmp_dir / "buffered_geom.gpkg"
 
-    mosaic, dst_transform = rasterio.merge.merge(tiles, nodata=nodata)
-    meta.update({**RASTERIO_DEFAULT_PROFILE,
-                 "transform": dst_transform,
-                 "height": mosaic.shape[1],
-                 "width": mosaic.shape[2],
-                 "count": 1,               # single band
-                 "nodata": nodata,
-                 }) 
-
-    with rasterio.open(output_file, "w", **meta) as dst:
-        dst.write(mosaic[0], 1)
-
-    current_run.log_info(
-        f"Merged {len(tiles)} tiles into mosaic {output_file} "
-        f"({meta['width']} x {meta['height']})"
-    )
-
-    return str(output_file), meta
-
-
-#########################
-def crop_with_buffer(geom: gpd.GeoDataFrame, input_raster: str, input_meta: str, output_raster: Path) -> str:
-
-    """Crop a raster with a buffer around the geometry and save to output path."""
-
-    # Add a buffer to the geometry of interest
+    # Add a buffer to the geometry of interest (in degrees)
     geom_buffured = geom.to_crs("EPSG:4326").geometry.buffer(0.2)
+    geom_buffured.to_file(output_geom_buffured)
 
-    # Windows generation
-    input_window = Window(0, 0, input_meta["width"], input_meta["height"])
-    sub_windows = subdivide(input_window, input_meta["width"] / 8, input_meta["width"] / 8)
+    cmd = [
+        "gdalwarp",
+        "-cutline", str(output_geom_buffured),
+        "-crop_to_cutline",                   # crop the raster with geometry of interest
+        "-multi",                             # multithreaded warping implementation 
+        "-wm", "8192",                        # RAM usage 
+        "-wo", "NUM_THREADS=ALL_CPUS",
+        "-co", "COMPRESS=DEFLATE",            # compress 
+        "-co", "TILED=YES",
+        "-overwrite",
+    ]
 
-    # Crop the input raster
-    with rasterio.open(input_raster) as src:
+    cmd.extend(tiles)
+    cmd.append(output_file)
 
-        nodata = src.nodata
+    subprocess.run(cmd)
 
-        with rasterio.open(output_raster, "w", **input_meta) as dst:
-
-            for window in sub_windows:
-
-                data = src.read(1, window=window)
-                window_transform = src.window_transform(window)
-                mask = geometry_mask(geometries=geom_buffured.geometry, 
-                                     out_shape=data.shape, 
-                                     transform=window_transform, 
-                                     invert=True)  # inside geom
-                out_image = np.where(mask, data, nodata)
-
-                dst.write(out_image, 1, window=window)
-
-    return str(output_raster)
+    return output_file
 
 
 #########################
