@@ -2,7 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pipeline import authenticate_iaso, clean_string, get_form_name
+from pipeline import authenticate_iaso, clean_string, get_form_name, parse_cutoff_date
 
 
 class FakeIASOConnection:  # noqa: B903
@@ -141,3 +141,52 @@ def test_get_form_name_api_failure():
 
         mock_current_run.log_error.assert_called_once()
         assert "Invalid form ID" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("input_date", "expected"),
+    [
+        ("2024-01-01", "2024-01-01"),
+        ("1999-12-31", "1999-12-31"),
+    ],
+)
+def test_parse_cutoff_date_valid(input_date: str, expected: str):
+    """Should return normalized ISO date for valid inputs."""
+    with patch("pipeline.current_run") as mock_current_run:
+        result = parse_cutoff_date(input_date)
+
+        assert result == expected
+        mock_current_run.log_error.assert_not_called()
+
+
+@pytest.mark.parametrize("input_date", [None, ""])
+def test_parse_cutoff_date_none_or_empty(input_date: str):
+    """Should return None for None or empty string inputs."""
+    with patch("pipeline.current_run") as mock_current_run:
+        result = parse_cutoff_date(input_date)
+
+        assert result is None
+        mock_current_run.log_error.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "input_date",
+    [
+        "01-01-2024",   # wrong format
+        "2024/01/01",   # wrong separator
+        "2024-13-01",   # invalid month
+        "2024-00-10",   # invalid month
+        "2024-02-30",   # invalid day
+        "abcd-ef-gh",   # not a date
+    ],
+)
+def test_parse_cutoff_date_invalid_format(input_date: str):
+    """Should log error and raise ValueError for invalid date strings."""
+    with patch("pipeline.current_run") as mock_current_run:
+        with pytest.raises(ValueError) as excinfo:  # noqa: PT011
+            parse_cutoff_date(input_date)
+
+        mock_current_run.log_error.assert_called_once_with(
+            "Invalid date format - must be YYYY-MM-DD"
+        )
+        assert "Invalid date format" in str(excinfo.value)
