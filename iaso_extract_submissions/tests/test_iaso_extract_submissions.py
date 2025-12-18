@@ -1,8 +1,15 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import polars as pl
 import pytest
-from pipeline import authenticate_iaso, clean_string, get_form_name, parse_cutoff_date
+from pipeline import (
+    authenticate_iaso,
+    clean_string,
+    fetch_submissions,
+    get_form_name,
+    parse_cutoff_date,
+)
 
 
 class FakeIASOConnection:  # noqa: B903
@@ -143,6 +150,10 @@ def test_get_form_name_api_failure():
         assert "Invalid form ID" in str(excinfo.value)
 
 
+# -------------------------------------------------------------------
+# parse_cutoff_date tests
+# -------------------------------------------------------------------
+
 @pytest.mark.parametrize(
     ("input_date", "expected"),
     [
@@ -190,3 +201,94 @@ def test_parse_cutoff_date_invalid_format(input_date: str):
             "Invalid date format - must be YYYY-MM-DD"
         )
         assert "Invalid date format" in str(excinfo.value)
+
+
+# -------------------------------------------------------------------
+# fetch_submissions tests
+# -------------------------------------------------------------------
+
+def test_fetch_submissions_success():
+    """Should log info and return DataFrame when extraction succeeds."""
+    iaso = MagicMock()
+    form_id = 123
+    cutoff_date = "2024-01-01"
+
+    expected_df = pl.DataFrame(
+        {
+            "id": [1, 2],
+            "value": ["a", "b"],
+        }
+    )
+
+    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
+         patch("pipeline.current_run") as mock_current_run:
+
+        mock_extract.return_value = expected_df
+
+        result = fetch_submissions(
+            iaso=iaso,
+            form_id=form_id,
+            cutoff_date=cutoff_date,
+        )
+
+        mock_current_run.log_info.assert_called_once_with(
+            f"Fetching submissions for form ID {form_id}"
+        )
+        mock_current_run.log_error.assert_not_called()
+
+        mock_extract.assert_called_once_with(
+            iaso, form_id, cutoff_date
+        )
+
+        assert isinstance(result, pl.DataFrame)
+        assert result.to_dicts() == expected_df.to_dicts()
+
+
+def test_fetch_submissions_success_without_cutoff_date():
+    """Should pass None cutoff_date through to extract_submissions."""
+    iaso = MagicMock()
+    form_id = 456
+
+    expected_df = pl.DataFrame({"id": []})
+
+    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
+         patch("pipeline.current_run") as mock_current_run:
+
+        mock_extract.return_value = expected_df
+
+        result = fetch_submissions(
+            iaso=iaso,
+            form_id=form_id,
+            cutoff_date=None,
+        )
+
+        mock_extract.assert_called_once_with(
+            iaso, form_id, None
+        )
+        mock_current_run.log_error.assert_not_called()
+
+        assert result.to_dicts() == expected_df.to_dicts()
+
+
+def test_fetch_submissions_failure():
+    """Should log error and re-raise exception when extraction fails."""
+    iaso = MagicMock()
+    form_id = 999
+    cutoff_date = "2024-01-01"
+
+    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
+         patch("pipeline.current_run") as mock_current_run:
+
+        mock_extract.side_effect = RuntimeError("API timeout")
+
+        with pytest.raises(RuntimeError):
+            fetch_submissions(
+                iaso=iaso,
+                form_id=form_id,
+                cutoff_date=cutoff_date,
+            )
+
+        mock_current_run.log_info.assert_called_once_with(
+            f"Fetching submissions for form ID {form_id}"
+        )
+        mock_current_run.log_error.assert_called_once()
