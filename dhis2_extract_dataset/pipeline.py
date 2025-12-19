@@ -205,7 +205,7 @@ def validate_ous_parameters(ous: list[str], groups: list[str]):
 
     Args:
         ous (list[str]): List of organization unit IDs or None.
-        groups (list[str): List of organization unit group IDs or None.
+        groups (list[str]): List of organization unit group IDs or None.
     """
     has_ous = isinstance(ous, list) and len(ous) > 0
     has_groups = isinstance(groups, list) and len(groups) > 0
@@ -262,7 +262,7 @@ def write_file(table: pl.DataFrame, dhis2_name: str, extract_name: str | None) -
     """Write the file as a csv and a parquet file.
 
     Args:
-        table (pd.DataFrame): The table to be saved.
+        table (pl.DataFrame): The table to be saved.
         dhis2_name (str): The name of the DHIS2 instance.
         extract_name (str | None): The name of the extraction. If None, the current date and time
         will be used as the name.
@@ -321,7 +321,7 @@ def write_to_db(table: pl.DataFrame, table_name: str):
     """Write the extracted data to the OpenHEXA workspace database.
 
     Args:
-        table (pd.DataFrame): The extracted data.
+        table (pl.DataFrame): The extracted data.
         table_name (str): The name of the table to write the data to.
     """
     engine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
@@ -336,7 +336,7 @@ def warning_post_extraction(
     """Check for warnings in the extracted data.
 
     Args:
-        table (pd.DataFrame): The extracted data.
+        table (pl.DataFrame): The extracted data.
         datasets (dict): Dictionary containing dataset information.
         dataset_id (str): List of dataset IDs.
         start (str): Start date of the extraction.
@@ -604,7 +604,7 @@ def extract_raw_data(
         include_children (bool): Whether to include child organizational units.
 
     Returns:
-        pd.DataFrame: Pandas DataFrame containing the extracted raw data, with additional columns
+        pl.DataFrame: Pandas DataFrame containing the extracted raw data, with additional columns
         for dataset name and period type.
     """
     dataset_name = datasets[dataset_id]["name"]
@@ -704,8 +704,8 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
         period_type (str): The DHIS2 period type. Supported values include:
             - "Daily": Converts to a daily period (e.g., "20230101").
             - "Weekly": Converts to a weekly period starting on Monday (e.g., "2023W1").
-            - "WeekWednesday", "WeekThursday", "WeekSaturday", "WeekSunday": Converts to a weekly
-               period aligned to the specified weekday.
+            - "WeeklyWednesday", "WeeklyThursday", "WeekSlyaturday", "WeeklySunday":
+               Converts to a weekly period aligned to the specified weekday.
             - "Monthly": Converts to a monthly period (e.g., "202301").
             - "BiMonthly": Converts to a bi-monthly period (e.g., "202301" for Jan-Feb).
             - "Quarterly": Converts to a quarterly period (e.g., "2023Q1").
@@ -714,7 +714,7 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
             - "FinancialApril": Converts to a financial year starting in April (e.g., "2023April").
             - "FinancialJuly": Converts to a financial year starting in July (e.g., "2023July").
             - "FinancialOct": Converts to a financial year starting in October (e.g., "2023Oct").
-            - "FinancialNov": Converts to a financial year starting in October (e.g., "2023Nov").
+            - "FinancialNov": Converts to a financial year starting in November (e.g., "2023Nov").
 
     Returns:
         Period: A DHIS2-compatible period object created from the generated period string.
