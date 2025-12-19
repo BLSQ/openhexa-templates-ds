@@ -6,10 +6,37 @@ from openhexa.sdk import workspace
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.periods import period_from_string
 
-
 # --------------------------------------------------------------------------------------------
 #  ----------------------------FUNCTIONS NOT USED ANYMORE -----------------------------------
 # --------------------------------------------------------------------------------------------
+
+
+def get_all_descendant_org_units(dhis: DHIS2, org_unit_id: str) -> list[str]:
+    """Recursively retrieves all descendant organization unit IDs for a given organization unit.
+
+    Args:
+        dhis: The DHIS2 client object used to interact with the DHIS2 API.
+        org_unit_id: The ID of the parent organization unit.
+
+    Returns:
+        list[str]: A list of descendant organization unit IDs.
+    """
+    descendants = []
+
+    def recurse(parent_id: str):
+        params = {"fields": "children[id]"}
+        response = dhis.api.get(f"organisationUnits/{parent_id}.json", params=params)
+        children = response.get("children", [])
+
+        for child in children:
+            child_id = child["id"]
+            descendants.append(child_id)
+            recurse(child_id)
+
+    recurse(org_unit_id)
+    return descendants
+
+
 # @dhis2_extract_dataset.task
 def create_extraction_folder(dhis2_name: str, datasets: dict, dataset_id: str) -> str:
     """Creates a folder structure for data extraction.

@@ -4,7 +4,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
-import pandas as pd
 import polars as pl
 from dateutil import relativedelta
 from openhexa.sdk import Dataset, workspace
@@ -193,7 +192,7 @@ def add_ds_information(
             pl.Series(
                 "period_type_extracted",
                 data_values["period"].map_elements(
-                    lambda x: str(type(period_from_string(x)).__name__).replace("Week", "Weekly")
+                    lambda x: str(type(period_from_string(x)).__name__), return_dtype=pl.Utf8
                 ),
             ),
         )
@@ -208,16 +207,15 @@ def validate_ous_parameters(ous: list[str], groups: list[str]):
         ous (list[str]): List of organization unit IDs or None.
         groups (list[str): List of organization unit group IDs or None.
     """
-    conditions = {
-        "ou_ids_only": isinstance(ous, list) and len(ous) > 0 and len(groups) == 0,
-        "ou_group_ids only": (isinstance(groups, list)) and len(groups) > 0 and len(ous) == 0,
-    }
+    has_ous = isinstance(ous, list) and len(ous) > 0
+    has_groups = isinstance(groups, list) and len(groups) > 0
 
-    if sum([1 for condition in conditions.values() if condition]) > 1:
+    if has_ous and has_groups:
         msg = "Please, choose only one option among (1) Orgunits, (2) Group(s) of orgunits"
         current_run.log_error(msg)
         raise ValueError(msg)
-    if sum([1 for condition in conditions.values() if condition]) == 0:
+
+    if not has_ous and not has_groups:
         msg = "Please provide either (1) Orgunits or (2) Group(s) of orgunits"
         current_run.log_error(msg)
         raise ValueError(msg)
@@ -421,32 +419,6 @@ def valid_date(date_str: str | None) -> str:
         return date_str
     current_run.log_error(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
     raise ValueError(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
-
-
-def get_all_descendant_org_units(dhis: DHIS2, org_unit_id: str) -> list[str]:
-    """Recursively retrieves all descendant organization unit IDs for a given organization unit.
-
-    Args:
-        dhis: The DHIS2 client object used to interact with the DHIS2 API.
-        org_unit_id: The ID of the parent organization unit.
-
-    Returns:
-        list[str]: A list of descendant organization unit IDs.
-    """
-    descendants = []
-
-    def recurse(parent_id: str):
-        params = {"fields": "children[id]"}
-        response = dhis.api.get(f"organisationUnits/{parent_id}.json", params=params)
-        children = response.get("children", [])
-
-        for child in children:
-            child_id = child["id"]
-            descendants.append(child_id)
-            recurse(child_id)
-
-    recurse(org_unit_id)
-    return descendants
 
 
 def get_dataset_org_units(dhis: DHIS2, dataset_id: str) -> list[str]:
@@ -725,40 +697,35 @@ def align_to_week_start(date: datetime, anchor_day: int) -> datetime:
 
 
 def isodate_to_period_type(date: str, period_type: str) -> Period:
-    """Converts an ISO date string to a DHIS2-compatible period string based on the specified period type.
+    """Converts ISO date string to DHIS2-compatible period string based on a specified period type.
 
     Args:
         date (str): The ISO date string in the format "YYYY-MM-DD".
         period_type (str): The DHIS2 period type. Supported values include:
             - "Daily": Converts to a daily period (e.g., "20230101").
             - "Weekly": Converts to a weekly period starting on Monday (e.g., "2023W1").
-            - "WeeklyMonday", "WeeklyTuesday", ..., "WeeklySunday": Converts to a weekly period
-              aligned to the specified weekday.
+            - "WeekWednesday", "WeekThursday", "WeekSaturday", "WeekSunday": Converts to a weekly
+               period aligned to the specified weekday.
             - "Monthly": Converts to a monthly period (e.g., "202301").
             - "BiMonthly": Converts to a bi-monthly period (e.g., "202301" for Jan-Feb).
             - "Quarterly": Converts to a quarterly period (e.g., "2023Q1").
             - "SixMonthly": Converts to a six-monthly period (e.g., "2023S1" for Jan-Jun).
-            - "SixMonthlyApril": Converts to a six-monthly period starting in April (e.g., "2023AprilS1").
             - "Yearly": Converts to a yearly period (e.g., "2023").
             - "FinancialApril": Converts to a financial year starting in April (e.g., "2023April").
             - "FinancialJuly": Converts to a financial year starting in July (e.g., "2023July").
             - "FinancialOct": Converts to a financial year starting in October (e.g., "2023Oct").
+            - "FinancialNov": Converts to a financial year starting in October (e.g., "2023Nov").
 
     Returns:
         Period: A DHIS2-compatible period object created from the generated period string.
 
     Raises:
         ValueError: If the provided period type is unsupported.
-    """  # noqa: E501
-    """Converts an ISO date to a DHIS2-compatible period string with support for weekly anchors."""
-    # Maps DHIS2 weekly period type to its anchor weekday (0 = Monday, 6 = Sunday)
+    """
     weekly_anchors = {
         "Weekly": 0,
-        "WeeklyMonday": 0,
-        "WeeklyTuesday": 1,
         "WeeklyWednesday": 2,
         "WeeklyThursday": 3,
-        "WeeklyFriday": 4,
         "WeeklySaturday": 5,
         "WeeklySunday": 6,
     }
@@ -772,11 +739,10 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
         anchor_day = weekly_anchors.get(period_type, 0)  # Default to Monday
         aligned_date = align_to_week_start(dt, anchor_day)
         iso_year, iso_week, _ = aligned_date.isocalendar()
-        if period_type != "Weekly" and period_type != "WeeklyMonday":
-            # If the period type specifies a weekday, append it
-            period_str = f"{iso_year}{period_type.replace('Weekly', '')[:3]}W{iso_week}"
-        else:
+        if period_type == "Weekly":
             period_str = f"{iso_year}W{iso_week}"  # No leading zero
+        elif period_type in ["WeeklyWednesday", "WeeklyThursday", "WeeklySaturday", "WeeklySunday"]:
+            period_str = f"{iso_year}{period_type.replace('Weekly', '')[:3]}W{iso_week}"
 
     elif period_type == "Monthly":
         period_str = dt.strftime("%Y%m")
@@ -789,13 +755,6 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
 
     elif period_type == "SixMonthly":
         period_str = f"{dt.year}S{1 if dt.month <= 6 else 2}"
-
-    elif period_type == "SixMonthlyApril":
-        if 4 <= dt.month <= 9:
-            period_str = f"{dt.year}AprilS1"
-        else:
-            ref_year = dt.year if dt.month >= 4 else dt.year - 1
-            period_str = f"{ref_year}AprilS2"
 
     elif period_type == "Yearly":
         period_str = f"{dt.year}"
@@ -811,6 +770,10 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
     elif period_type == "FinancialOct":
         fy = dt.year if dt.month >= 10 else dt.year - 1
         period_str = f"{fy}Oct"
+
+    elif period_type == "FinancialNov":
+        fy = dt.year if dt.month >= 11 else dt.year - 1
+        period_str = f"{fy}Nov"
 
     else:
         raise ValueError(f"Unsupported DHIS2 period type: {period_type}")
@@ -845,8 +808,8 @@ def get_periods_with_no_data(data: pl.DataFrame, start: Period, end: Period, dat
 
     if len(unexpected_periods) > 0:
         current_run.log_warning(
-            f"Following periods not expected, but found: \
-                {sorted(unexpected_periods)} for dataset {dataset_name}"
+            "Following periods not expected, but found: "
+            f"{sorted(unexpected_periods)} for dataset {dataset_name}"
         )
 
 
@@ -872,8 +835,8 @@ def get_dataelements_with_no_data(data: pl.DataFrame, dataset: dict):
 
     if len(unexpected_des) > 0:
         current_run.log_warning(
-            f"Following dataElements not expected, but found: \
-                {sorted(unexpected_des)} for dataset {dataset_name}"
+            "Following dataElements not expected, but found: "
+            f"{sorted(unexpected_des)} for dataset {dataset_name}"
         )
 
 
