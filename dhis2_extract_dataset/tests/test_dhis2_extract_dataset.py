@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 import config
 import polars as pl
 import pytest
-from openhexa.sdk.pipelines import current_run
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.periods import Period
 
@@ -155,7 +154,7 @@ def test_add_ds_information():
     assert empty_result.columns == empty_df.columns
 
 
-def test_get_periods_with_no_data():
+def test_get_periods_with_no_data(monkeypatch: pytest.MonkeyPatch):
     """Test get_periods_with_no_data function.
 
     We test:
@@ -163,11 +162,13 @@ def test_get_periods_with_no_data():
     (2) Extra periods are logged correctly.
     (3) Data with all periods does not log anything.
     """
-    current_run.log_warning = MagicMock()
+    mock_run = MagicMock()
+    monkeypatch.setattr("pipeline.run", mock_run)
+
     get_periods_with_no_data(
         config.data_with_periods_weird, config.start, config.end, config.dictionary_ds_one
     )
-    calls = [call[0][0] for call in current_run.log_warning.call_args_list]
+    calls = [call[0][0] for call in mock_run.log_warning.call_args_list]
 
     assert len(calls) == 2
     assert (
@@ -179,14 +180,14 @@ def test_get_periods_with_no_data():
         "for dataset Test Dataset" in calls
     )
 
-    current_run.log_warning.reset_mock()
+    mock_run.log_warning.reset_mock()
     get_periods_with_no_data(
         config.data_with_periods_okey, config.start, config.end, config.dictionary_ds_one
     )
-    current_run.log_warning.assert_not_called()
+    mock_run.log_warning.assert_not_called()
 
 
-def test_get_dataelements_with_no_data():
+def test_get_dataelements_with_no_data(monkeypatch: pytest.MonkeyPatch):
     """Test get_dataelements_with_no_data function.
 
     We test:
@@ -194,9 +195,10 @@ def test_get_dataelements_with_no_data():
     (2) Extra dataElements are logged correctly.
     (3) Data with all dataElements does not log anything.
     """
-    current_run.log_warning = MagicMock()
+    mock_run = MagicMock()
+    monkeypatch.setattr("pipeline.run", mock_run)
     get_dataelements_with_no_data(config.data_with_periods_weird, config.dictionary_ds_one)
-    calls = [call[0][0] for call in current_run.log_warning.call_args_list]
+    calls = [call[0][0] for call in mock_run.log_warning.call_args_list]
 
     assert len(calls) == 2
     assert (
@@ -207,9 +209,9 @@ def test_get_dataelements_with_no_data():
         f"Following dataElements not expected, but found: {config.extra_des} "
         "for dataset Test Dataset" in calls
     )
-    current_run.log_warning.reset_mock()
+    mock_run.log_warning.reset_mock()
     get_dataelements_with_no_data(config.data_with_periods_okey, config.dictionary_ds_one)
-    current_run.log_warning.assert_not_called()
+    mock_run.log_warning.assert_not_called()
 
 
 def test_get_descendants():

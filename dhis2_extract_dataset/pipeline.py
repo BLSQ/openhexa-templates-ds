@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 from datetime import date, datetime, timedelta
@@ -20,6 +21,31 @@ from openhexa.toolbox.dhis2.dataframe import (
 )
 from openhexa.toolbox.dhis2.periods import Period, period_from_string
 from sqlalchemy import create_engine
+
+logger = logging.getLogger(__name__)
+
+
+class LocalRun:
+    """Mock current_run for local executions."""
+
+    def log_info(self, msg: str) -> None:
+        """Mock current_run.log_info()."""
+        logger.info(msg)
+
+    def log_warning(self, msg: str) -> None:
+        """Mock current_run.log_warning()."""
+        logger.warning(msg)
+
+    def log_error(self, msg: str) -> None:
+        """Mock current_run.log_error()."""
+        logger.error(msg)
+
+    def add_file_output(self, fp: str) -> None:
+        """Mock current_run.add_file_output()."""
+        logger.info(f"File output added: {fp}")
+
+
+run = current_run or LocalRun()
 
 
 @pipeline("dhis2_extract_dataset")
@@ -212,12 +238,12 @@ def validate_ous_parameters(ous: list[str], groups: list[str]):
 
     if has_ous and has_groups:
         msg = "Please, choose only one option among (1) Orgunits, (2) Group(s) of orgunits"
-        current_run.log_error(msg)
+        run.log_error(msg)
         raise ValueError(msg)
 
     if not has_ous and not has_groups:
         msg = "Please provide either (1) Orgunits or (2) Group(s) of orgunits"
-        current_run.log_error(msg)
+        run.log_error(msg)
         raise ValueError(msg)
 
 
@@ -289,8 +315,8 @@ def write_file(table: pl.DataFrame, dhis2_name: str, extract_name: str | None) -
     table.write_csv(f"{output_path}.csv")
     table.write_parquet(f"{output_path}.parquet")
 
-    current_run.add_file_output(f"{output_path}.csv")
-    current_run.add_file_output(f"{output_path}.parquet")
+    run.add_file_output(f"{output_path}.csv")
+    run.add_file_output(f"{output_path}.parquet")
 
     return version_name
 
@@ -314,7 +340,7 @@ def write_to_dataset(table: pl.DataFrame, dataset: Dataset, version_name: str):
             temp_df.write_parquet(temp_path)
             version.add_file(source=temp_path, filename=f"{dx_name}.parquet")
 
-    current_run.log_info(f"Data saved in the OpenHEXA dataset: {dataset.name}")
+    run.log_info(f"Data saved in the OpenHEXA dataset: {dataset.name}")
 
 
 def write_to_db(table: pl.DataFrame, table_name: str):
@@ -326,7 +352,7 @@ def write_to_db(table: pl.DataFrame, table_name: str):
     """
     engine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
     table.to_pandas().to_sql(table_name, con=engine, if_exists="replace", index=False)
-    current_run.log_info(f"Table '{table_name}' saved in the workspace database")
+    run.log_info(f"Table '{table_name}' saved in the workspace database")
 
 
 # @dhis2_extract_dataset.task
@@ -365,9 +391,7 @@ def check_parameters_validation(ou_ids: list[str], ou_group_ids: list[str]):
         and (ou_ids is None or len(ou_ids) == 0),
     }
     if sum([1 for condition in conditions.values() if condition]) > 1:
-        current_run.log_error(
-            "Please, choose only one option among (1) Orgunits, (2) Group(s) oforgunits"
-        )
+        run.log_error("Please, choose only one option among (1) Orgunits, (2) Group(s) oforgunits")
         raise ValueError(
             "Please, choose only one option among (1) Orgunits, (2) Group(s) of orgunits"
         )
@@ -386,20 +410,18 @@ def warning_request(dataset_id: str, datasets: dict, selected_ou_ids: set) -> se
         associated with the datasets that are not in `data_element_ids`. Otherwise, returns None.
     """
     if dataset_id not in datasets:
-        current_run.log_error(f"Dataset id: {dataset_id} not found in this DHIS2 instance.")
+        run.log_error(f"Dataset id: {dataset_id} not found in this DHIS2 instance.")
         raise ValueError(f"Dataset id: {dataset_id} not found in this DHIS2 instance.")
     datasets_ous = {ou for ou in datasets[dataset_id]["organisation_units"]}
     dataset_ous_intersection = selected_ou_ids.intersection(datasets_ous)
     if len(dataset_ous_intersection) != len(selected_ou_ids):
-        current_run.log_warning(
+        run.log_warning(
             f"Only {len(dataset_ous_intersection)} orgunits out of {len(selected_ou_ids)} \
             selected are associated to the datasets. If this is unexpected, verify the orgunits\
             associated to the dataset {datasets[dataset_id]['name']} in your DHIS2 instance."
         )
         if len(dataset_ous_intersection) == 0:
-            current_run.log_error(
-                f"No orgunits associated to the datasets {datasets[dataset_id]['name']}."
-            )
+            run.log_error(f"No orgunits associated to the datasets {datasets[dataset_id]['name']}.")
     return dataset_ous_intersection
 
 
@@ -417,7 +439,7 @@ def valid_date(date_str: str | None) -> str:
         return date.today().isoformat()
     if is_iso_date(date_str):
         return date_str
-    current_run.log_error(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
+    run.log_error(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
     raise ValueError(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
 
 
@@ -476,7 +498,7 @@ def fetch_dataset_data_for_valid_descendants(
             org_units=valid_org_units,
         )
     except Exception as e:
-        current_run.log_error(f"Failed to extract dataset: {e}")
+        run.log_error(f"Failed to extract dataset: {e}")
         raise
 
     return data_values
@@ -550,7 +572,7 @@ def fetch_dataset_data_for_valid_group_orgunits(
             org_units=valid_ous,
         )
     except Exception as e:
-        current_run.log_error(f"Failed to extract dataset from org unit groups: {e}")
+        run.log_error(f"Failed to extract dataset from org unit groups: {e}")
         raise
 
     return data_values
@@ -609,8 +631,8 @@ def extract_raw_data(
     """
     dataset_name = datasets[dataset_id]["name"]
     dataset_period_type = datasets[dataset_id]["periodType"]
-    current_run.log_info(f"Extracting data for dataset {dataset_name}")
-    current_run.log_info(f"Period type: {dataset_period_type}")
+    run.log_info(f"Extracting data for dataset {dataset_name}")
+    run.log_info(f"Period type: {dataset_period_type}")
 
     if len(ou_ids) == 0:
         ou_ids = None
@@ -630,9 +652,7 @@ def extract_raw_data(
         )
     except Exception as e:
         if isinstance(ou_ids, list) and len(ou_ids) > 0:
-            current_run.log_info(
-                f"Fetching data cutting request for all descendants of orgunits: {ou_ids}"
-            )
+            run.log_info(f"Fetching data cutting request for all descendants of orgunits: {ou_ids}")
             data_values = fetch_dataset_data_for_valid_descendants(
                 dhis=dhis,
                 pyramid=pyramid,
@@ -643,7 +663,7 @@ def extract_raw_data(
                 end_date=end.datetime,
             )
         elif isinstance(ou_group_ids, list) and len(ou_group_ids) > 0:
-            current_run.log_info(
+            run.log_info(
                 f"Fetching data cutting request for all orgunits in groups: {ou_group_ids}"
             )
             data_values = fetch_dataset_data_for_valid_group_orgunits(
@@ -654,13 +674,13 @@ def extract_raw_data(
                 end_date=end.datetime,
             )
         else:
-            current_run.log_error(
+            run.log_error(
                 f"Failed to extract dataset {dataset_id} for period {start!s} to {end!s}."
             )
             raise e
 
     length_table = data_values.height
-    current_run.log_info("Number of rows extracted (total) : " + str(length_table))
+    run.log_info("Number of rows extracted (total) : " + str(length_table))
 
     return data_values
 
@@ -802,12 +822,12 @@ def get_periods_with_no_data(data: pl.DataFrame, start: Period, end: Period, dat
 
     dataset_name = dataset["name"]
     if len(missing_periods) > 0:
-        current_run.log_warning(
+        run.log_warning(
             f"Following periods have no data: {sorted(missing_periods)} for dataset {dataset_name}"
         )
 
     if len(unexpected_periods) > 0:
-        current_run.log_warning(
+        run.log_warning(
             "Following periods not expected, but found: "
             f"{sorted(unexpected_periods)} for dataset {dataset_name}"
         )
@@ -829,12 +849,12 @@ def get_dataelements_with_no_data(data: pl.DataFrame, dataset: dict):
 
     dataset_name = dataset["name"]
     if len(missing_des) > 0:
-        current_run.log_warning(
+        run.log_warning(
             f"Following dataElements have no data: {sorted(missing_des)} for dataset {dataset_name}"
         )
 
     if len(unexpected_des) > 0:
-        current_run.log_warning(
+        run.log_warning(
             "Following dataElements not expected, but found: "
             f"{sorted(unexpected_des)} for dataset {dataset_name}"
         )
