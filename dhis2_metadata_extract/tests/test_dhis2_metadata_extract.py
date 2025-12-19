@@ -131,3 +131,27 @@ def test_save_file_directory_error(tmp_path: Path):  # noqa: D103
         pytest.raises(Exception, match="Error creating output directory"),
     ):
         save_file(df, bad_path, "x.csv")
+
+
+def test_validate_data() -> None:
+    """Test data validation against expected schema.
+
+    We add some specific cases for validate_data().
+
+    The get_sample_org_units_df() function returns a pyramid with 4 levels, so we can
+    test the validation on level 4 using org_units_expected_columns[0:4]. The number of
+    levels have been made dynamic (depending on the DHIS2 instance) in the pipeline code,
+    so the validation does not fail.
+    """
+    org_units_df = get_sample_org_units_df()
+
+    # should not fail
+    validate_data(org_units_df, org_units_expected_columns[0:4], data_name="org_units")
+
+    # empty dataframe
+    with pytest.raises(RuntimeError, match="empty"):
+        validate_data(org_units_df.head(0), org_units_expected_columns[0:4], data_name="org_units")
+
+    # column not found in dataframe
+    with pytest.raises(RuntimeError, match="data_values is empty"):
+        validate_data(org_units_df.head(0), org_units_expected_columns[0:5], data_name="org_units")
