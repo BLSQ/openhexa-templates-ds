@@ -31,7 +31,7 @@ The pipeline builds OpenRosa-compliant XML payloads, enriches them with instance
 
 ### Additional Column Expectations
 Depending on strategy the input file must include:
-|- `CREATE`: `org_unit_id` (and optionally latitude / longitude / altitude / accuracy)
+- `CREATE`: `org_unit_id` (and optionally latitude / longitude / altitude / accuracy)
 - `UPDATE`: `id` (numeric IASO Instance ID) and `instanceID` (UUID with or without `uuid:` prefix); optional location columns for patching.
 - `CREATE_AND_UPDATE`: Combination of above; rows with `id` null are treated as CREATE.
 - `DELETE`: `id` only.
@@ -112,20 +112,3 @@ flowchart TD
 | XML upload fails (status ≠ 201) | Invalid XML or server error | Inspect generated XML file; validate namespaces & instanceID |
 | Missing namespaces in edited XML | ElementTree stripped unused prefixes | Function re-injects `xmlns:jr` & `xmlns:orx` automatically |
 | Wrong UUID in update | `instanceID` missing `uuid:` prefix | Prefix handled; ensure raw value present |
-
-## Performance Considerations
-- Processes row-by-row; for very large batches you may consider chunking the input file.
-- Reuses token headers; avoids repeated authentication.
-- Version-specific template caching prevents rebuilding for each row.
-
-## Extensibility
-Potential enhancements:
-- Retry/backoff on transient HTTP failures.
-- Batched `/api/instances` posts for updates (currently per-row).
-- Structured JSON summary artifact saved to output directory.
-- Additional validation for geospatial fields (range checks).
-
-## Notes
-- Strict validation is optional; disable for rapid prototyping.
-- Ensure project-form alignment: form must belong to the specified project/app.
-- Delete operations are irreversible; consider backing up before large deletions.
