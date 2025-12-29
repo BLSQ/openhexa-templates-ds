@@ -132,7 +132,7 @@ def retrieve_shapes(
             raise ValueError("No shapes found for the specified organisation unit level")
 
         current_run.log_info(f"{df_pyramid.shape[0]} Shapes extracted for org level {org_level}")
-        shapes = transform_shapes(df_pyramid)
+        shapes = transform_shapes(df_pyramid, geometry_column=geometry_column)
         fname = f"shapes_level{org_level}_{datetime.now().strftime('%Y_%m_%d_%H%M')}.gpkg"
 
         save_shapes(
@@ -158,7 +158,7 @@ def transform_shapes(
     """
 
     # Convert GeoJSON strings to Shapely geometries
-    def geojson_to_shapely(geojson_str: any) -> BaseGeometry:
+    def geojson_to_shapely(geojson_str: str) -> BaseGeometry:
         geojson = json.loads(geojson_str)
         return shape(geojson)
 
