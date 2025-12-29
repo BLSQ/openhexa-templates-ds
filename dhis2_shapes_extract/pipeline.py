@@ -132,26 +132,7 @@ def retrieve_shapes(
             raise ValueError("No shapes found for the specified organisation unit level")
 
         current_run.log_info(f"{df_pyramid.shape[0]} Shapes extracted for org level {org_level}")
-
-        # Convert GeoJSON strings to Shapely geometries
-        def geojson_to_shapely(geojson_str: any) -> BaseGeometry:
-            geojson = json.loads(geojson_str)
-            return shape(geojson)
-
-        # Apply the conversion to the geometry column
-        shapely_geoms = (
-            df_pyramid[geometry_column]
-            .map_elements(geojson_to_shapely, return_dtype=pl.Object)
-            .to_list()
-        )
-
-        # Convert to GeoPandas DataFrame
-        shapes = gpd.GeoDataFrame(
-            df_pyramid.drop(geometry_column).to_pandas(),
-            geometry=shapely_geoms,
-            crs="EPSG:4326",  # NOTE: Assuming WGS84 coordinate system
-        )
-
+        shapes = transform_shapes(df_pyramid, geometry_column=geometry_column)
         fname = f"shapes_level{org_level}_{datetime.now().strftime('%Y_%m_%d_%H%M')}.gpkg"
 
         save_shapes(
@@ -163,6 +144,37 @@ def retrieve_shapes(
         current_run.add_file_output((output_path / fname).as_posix())
     except Exception as e:
         raise Exception(f"Error while extracting shapes: {e}") from e
+
+
+def transform_shapes(
+    df_shapes: pl.DataFrame, geometry_column: str = "geometry"
+) -> gpd.GeoDataFrame:
+    """Transform a Polars DataFrame containing geometry data into a GeoPandas GeoDataFrame.
+
+    Returns
+    -------
+    gpd.GeoDataFrame
+        A GeoDataFrame with geometries converted from GeoJSON strings.
+    """
+
+    # Convert GeoJSON strings to Shapely geometries
+    def geojson_to_shapely(geojson_str: str) -> BaseGeometry:
+        geojson = json.loads(geojson_str)
+        return shape(geojson)
+
+    # Apply the conversion to the geometry column
+    shapely_geoms = (
+        df_shapes[geometry_column]
+        .map_elements(geojson_to_shapely, return_dtype=pl.Object)
+        .to_list()
+    )
+
+    # Convert to GeoPandas DataFrame
+    return gpd.GeoDataFrame(
+        df_shapes.drop(geometry_column).to_pandas(),
+        geometry=shapely_geoms,
+        crs="EPSG:4326",  # NOTE: Assuming WGS84 coordinate system
+    )
 
 
 def save_shapes(shapes: gpd.GeoDataFrame, output_path: Path, filename: str) -> None:
