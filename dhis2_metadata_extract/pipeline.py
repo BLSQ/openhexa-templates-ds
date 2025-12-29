@@ -259,7 +259,7 @@ def retrieve_org_unit_groups(
 
 
 def format_organisation_units_groups(org_unit_groups: pl.DataFrame) -> pl.DataFrame:
-    """Format organisation unit groups by dropping specific columns.
+    """Format organisation unit groups by transforming specific columns.
 
     Parameters
     ----------
@@ -314,7 +314,7 @@ def retrieve_datasets(
 
 
 def format_datasets(datasets: pl.DataFrame) -> pl.DataFrame:
-    """Format datasets by dropping specific columns.
+    """Format datasets by transforming specific columns.
 
     Parameters
     ----------
@@ -463,12 +463,12 @@ def retrieve_category_option_combos(
     if run:
         current_run.log_info("Retrieving category option combos")
         try:
-            categorty_options = get_category_option_combos(dhis2_client)
-            categorty_options_formatted = format_category_option_combos(categorty_options)
+            category_options = get_category_option_combos(dhis2_client)
+            categorty_options_formatted = format_category_option_combos(category_options)
             validate_data(
                 categorty_options_formatted,
                 retrieved_categorty_options_expected_columns,
-                data_name="categorty_options",
+                data_name="category_options",
             )
             filename = f"category_option_combos_{datetime.now().strftime('%Y_%m_%d_%H%M')}.csv"
             save_file(df=categorty_options_formatted, output_path=output_path, filename=filename)
@@ -478,14 +478,14 @@ def retrieve_category_option_combos(
         current_run.add_file_output((output_path / filename).as_posix())
 
 
-def format_category_option_combos(categorty_options: pl.DataFrame) -> pl.DataFrame:
+def format_category_option_combos(category_options: pl.DataFrame) -> pl.DataFrame:
     """Format category option combos.
 
     NOTE: Nothing to transform at the moment.
 
     Parameters
     ----------
-    categorty_options : pl.DataFrame
+    category_options : pl.DataFrame
         The DataFrame containing category option combos.
 
     Returns
@@ -493,7 +493,7 @@ def format_category_option_combos(categorty_options: pl.DataFrame) -> pl.DataFra
     pl.DataFrame
         A DataFrame with selected columns dropped.
     """
-    return categorty_options
+    return category_options
 
 
 def save_file(df: pl.DataFrame, output_path: Path, filename: str) -> None:
