@@ -17,8 +17,7 @@ from openhexa.sdk import (
 from openhexa.sdk.datasets.dataset import Dataset
 from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO, dataframe
-
-from .utils import clean_string, in_dataset_version
+from utils import clean_string, in_dataset_version
 
 
 @pipeline("iaso_extract_submissions")
@@ -475,3 +474,4 @@ def _generate_output_file_path(
 
 if __name__ == "__main__":
     iaso_extract_submissions()
+
