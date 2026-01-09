@@ -6,8 +6,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pipeline import RequestParams, validate_parameters
-from validate import validate_data
+from ..pipeline import RequestParams, validate, validate_parameters
+from ..validate import DataValidationError
 
 
 def test_validate_parameters() -> None:
@@ -86,13 +86,13 @@ def test_validate_data() -> None:
     df = pl.read_parquet(sample_file)
 
     # should not fail
-    validate_data(df)
+    validate(df)
 
     # empty dataframe
-    with pytest.raises(RuntimeError, match="empty"):
-        validate_data(df.head(0))
+    with pytest.raises(DataValidationError, match="empty"):
+        validate(df.head(0))
 
     # unexpected column in dataframe
     df_extra = df.with_columns(pl.lit("x").alias("unexpected_col"))
-    with pytest.raises(RuntimeError, match="not validated"):
-        validate_data(df_extra)
+    with pytest.raises(DataValidationError, match="unexpected"):
+        validate(df_extra)
