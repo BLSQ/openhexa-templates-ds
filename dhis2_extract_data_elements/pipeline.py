@@ -161,6 +161,9 @@ def dhis2_extract_data_elements(
     if not organisation_unit_groups:
         organisation_unit_groups = None
 
+    if not end_date:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+
     params = RequestParams(
         data_elements=data_elements,
         data_element_groups=data_element_groups,
