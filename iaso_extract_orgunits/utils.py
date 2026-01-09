@@ -95,8 +95,7 @@ def in_dataset_version(file_path: Path, dataset_version: DatasetVersion) -> bool
     file_hash = sha256_of_file(file_path)
     for file in dataset_version.files:
         remote_hash = hashlib.sha256()
-        for chunk in iter(lambda f=file: f.read(8192), b""):
-            remote_hash.update(chunk)
+        remote_hash.update(file.read())
         if file_hash == remote_hash.hexdigest():
             return True
     return False
