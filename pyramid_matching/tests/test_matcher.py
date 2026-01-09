@@ -44,3 +44,8 @@ def test_matcher_match_with_fuzzy(matcher: Matcher):
     assert result[1] == "TSHUAPA"
     assert result[2] == "ym2K6YcSNl9", "Expected  list of attributes, result[3] == 'ym2K6YcSNl9'"
     assert result[3] == 100, "Expected score = 100"
+
+
+def test_matcher_match_with_geometry(matcher: Matcher):
+    """Test the geometry matcher functionality (to be implemented)."""
+    pytest.fail("TODO: implement geometry matcher test")

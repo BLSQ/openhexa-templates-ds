@@ -46,6 +46,24 @@ def test_fuzzy_get_similarity_match(fuzzy_matcher: FuzzyMatcher):
     assert result[3] == 100, "Expected score to be 100"
 
 
+def test_matcher_match_with_fuzzy_threshold(fuzzy_matcher: FuzzyMatcher):
+    """Test fuzzy matcher similarity function with a set of candidates."""
+    candidates = {
+        "TSHUAPA": ["ym2K6YcSNl9"],
+        "HAUT LOMAMI": ["fEKDiQIuqeE"],
+        "KWILU": ["BmKjwqc6BEw"],
+        "HAUT KATANGA": ["F9w3VW1cQmb"],
+        "EQUATEUR": ["XjeRGfqHMrl"],
+        "MANIEMA": ["uyuwe6bqphf"],
+    }
+    result = fuzzy_matcher.get_similarity("TSHUAPAS", candidates, threshold=90)
+    assert result[1] == "TSHUAPA"
+    assert result[2] == "ym2K6YcSNl9", "Expected  list of attributes, result[3] == 'ym2K6YcSNl9'"
+    assert result[3] > 93.3, "Expected score > 93.33"
+    result = fuzzy_matcher.get_similarity("TSHUAPAS", candidates, threshold=95)
+    assert result is None, "Expected no match above threshold 95"
+
+
 def test_fuzzy_get_similarity_no_match(fuzzy_matcher: FuzzyMatcher):
     """Test that get_similarity returns None when there is no match above the threshold."""
     candidates = {
