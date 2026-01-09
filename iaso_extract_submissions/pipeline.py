@@ -474,4 +474,3 @@ def _generate_output_file_path(
 
 if __name__ == "__main__":
     iaso_extract_submissions()
-
