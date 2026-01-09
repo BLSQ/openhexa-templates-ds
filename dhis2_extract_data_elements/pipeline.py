@@ -21,7 +21,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 
-from .validate import validate_data
+from .validate import DataValidationError, ExpectedColumn, validate_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,7 @@ def dhis2_extract_data_elements(
     meta = extract_metadata(dhis2_connection=src_dhis2)
     data = extract_data(dhis2_connection=src_dhis2, params=params)
     data = add_names(data_values=data, metadata=meta)
-    validate_dataframe(data_values=data)
+    validate(data_values=data)
 
     if dst_file:
         write_to_file(data_values=data, dst_file=dst_file)
@@ -383,21 +383,37 @@ def add_names(
 
 
 @dhis2_extract_data_elements.task
-def validate_dataframe(data_values: pl.DataFrame) -> pl.DataFrame:
+def validate(df: pl.DataFrame) -> None:
     """Validate the extracted data values dataframe.
 
     Args:
-        data_values: Extracted data values as a Polars DataFrame.
-
-    Returns:
-        Validated data values as a Polars DataFrame.
-
-    Raises:
-        ValueError: If validation fails.
-
+        df: Extracted data values as a Polars DataFrame.
     """
-    validate_data(data_values)
-    return data_values
+    run.log_info("Validating extracted dataframe")
+    expected_columns: list[ExpectedColumn] = [
+        ExpectedColumn(name="data_element_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(name="category_option_combo_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(name="organisation_unit_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(name="period", type=pl.String, not_null=True),
+        ExpectedColumn(name="value", type=pl.String),
+        ExpectedColumn(name="created", type=pl.Datetime, not_null=True),
+        ExpectedColumn(name="last_updated", type=pl.Datetime, not_null=True),
+    ]
+
+    for lvl in range(1, 10):
+        name = f"level_{lvl}_id"
+        expected_columns.append(ExpectedColumn(name=name, type=pl.String, required=False))
+        name = f"level_{lvl}_name"
+        expected_columns.append(ExpectedColumn(name=name, type=pl.String, required=False))
+
+    try:
+        validate_dataframe(df=df, expected_columns=expected_columns)
+    except DataValidationError as e:
+        for error in e.errors:
+            run.log_error(f"{error.column_name}: {error.message}")
+        raise
+
+    run.log_info("Successfully validated extracted dataframe")
 
 
 @dhis2_extract_data_elements.task
