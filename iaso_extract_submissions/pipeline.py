@@ -17,7 +17,8 @@ from openhexa.sdk import (
 from openhexa.sdk.datasets.dataset import Dataset
 from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO, dataframe
-from utils import clean_string, in_dataset_version
+
+from .utils import clean_string, in_dataset_version
 
 
 @pipeline("iaso_extract_submissions")
@@ -138,7 +139,7 @@ def authenticate_iaso(conn: IASOConnection) -> IASO:
     except Exception as exc:
         error_msg = f"IASO authentication failed: {exc}"
         current_run.log_error(error_msg)
-        raise
+        raise RuntimeError(error_msg) from exc
 
 
 # @iaso_extract_submissions.task
@@ -160,7 +161,7 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
         return clean_string(response.json().get("name"))
     except Exception as e:
         current_run.log_error(f"Form fetch failed: {e}")
-        raise
+        raise ValueError("Invalid form ID") from e
 
 
 # @iaso_extract_submissions.task
@@ -270,7 +271,7 @@ def export_to_file(
     submissions: pl.DataFrame,
     form_name: str,
     output_file_name: str | None,
-    output_format: str,
+    output_format: str | None,
     db_table_name: str | None = None,
     dataset: Dataset | None = None,
 ) -> Path | None:
@@ -311,7 +312,7 @@ def export_to_file(
 
 @iaso_extract_submissions.task
 def export_to_database(
-    submissions: pl.DataFrame, table_name: str, mode: Literal["replace", "append"]
+    submissions: pl.DataFrame, table_name: str | None, mode: Literal["replace", "append"] | None
 ) -> None:
     """Saves form submissions to a database.
 
@@ -337,14 +338,14 @@ def export_to_database(
 
 
 @iaso_extract_submissions.task
-def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
+def export_to_dataset(file_path: Path | None, dataset: Dataset | None) -> None:
     """Saves form submissions to the specified dataset.
 
     Args:
         file_path (Path): The path to the file containing the submissions data.
         dataset (Dataset): The dataset where the submissions will be stored.
     """
-    if dataset is None:
+    if dataset is None or file_path is None:
         return
 
     latest_version = dataset.latest_version
@@ -431,7 +432,7 @@ def _validate_schema(submissions: pl.DataFrame, table_name: str) -> bool:
 
 
 def _generate_output_file_path(
-    form_name: str, output_file_name: str | None, output_format: str
+    form_name: str, output_file_name: str | None, output_format: str | None
 ) -> Path:
     """Generate the output file path based on provided parameters.
 
@@ -443,7 +444,7 @@ def _generate_output_file_path(
     Returns:
         Path to the output file.
     """
-    if output_file_name:
+    if output_file_name and output_format:
         output_file_path = Path(output_file_name)
 
         if not output_file_path.suffix:
