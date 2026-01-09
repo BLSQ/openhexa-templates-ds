@@ -20,7 +20,8 @@ from openhexa.toolbox.dhis2.dataframe import (
     get_organisation_units,
     join_object_names,
 )
-from validate import validate_data
+
+from .validate import validate_data
 
 logger = logging.getLogger(__name__)
 
