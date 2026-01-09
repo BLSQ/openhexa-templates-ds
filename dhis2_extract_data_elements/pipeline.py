@@ -326,8 +326,8 @@ def extract_data(
         data_values = extract_data_elements(
             dhis2=dhis2,
             data_elements=params.data_elements,
-            org_units=params.organisation_units,
-            org_unit_groups=params.organisation_unit_groups,
+            org_units=params.organisation_units,  # type: ignore
+            org_unit_groups=params.organisation_unit_groups,  # type: ignore
             include_children=params.include_children,
             start_date=datetime.fromisoformat(params.start_date),
             end_date=datetime.fromisoformat(params.end_date) if params.end_date else None,
@@ -337,8 +337,8 @@ def extract_data(
         data_values = extract_data_element_groups(
             dhis2=dhis2,
             data_element_groups=params.data_element_groups,
-            org_units=params.organisation_units,
-            org_unit_groups=params.organisation_unit_groups,
+            org_units=params.organisation_units,  # type: ignore
+            org_unit_groups=params.organisation_unit_groups,  # type: ignore
             include_children=params.include_children,
             start_date=datetime.fromisoformat(params.start_date),
             end_date=datetime.fromisoformat(params.end_date) if params.end_date else None,
