@@ -94,5 +94,5 @@ def test_validate_data() -> None:
 
     # unexpected column in dataframe
     df_extra = df.with_columns(pl.lit("x").alias("unexpected_col"))
-    with pytest.raises(DataValidationError, match="unexpected"):
+    with pytest.raises(DataValidationError, match="not expected"):
         validate(df_extra)
