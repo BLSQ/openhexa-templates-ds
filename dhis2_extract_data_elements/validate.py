@@ -139,10 +139,6 @@ def validate_data(df: pl.DataFrame) -> None:
         * Only expected columns are allowed; unexpected columns are flagged.
         * Each column must match the expected Polars data type.
         * Columns marked `not_null` cannot contain null or empty-string values.
-        * Columns with a `number_of_characters` constraint must have exactly
-          the specified number of characters.
-        * Columns marked `can_be_converted_to_integer` must be safely castable
-          to integers.
 
     Args:
         df (pl.DataFrame): The Polars DataFrame to validate.
