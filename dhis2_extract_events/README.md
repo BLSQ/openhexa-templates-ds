@@ -34,11 +34,26 @@ Either the start date or the period need to be provided.
 
 ## Output
 
-The pipeline generates a Parquet file containing the extracted events with enriched metadata. By default, the file is saved to:
+### 1. File Output (Parquet)
+The pipeline generates a Parquet file containing the extracted events with enriched metadata. 
 
+- If the parameter `Output file` is not provided, the file is saved to:
 ```
 <workspace>/pipelines/dhis2_tracker_extract/<timestamp>/events.parquet
 ```
+
+- If the parameter `Output file` is provided, the file is saved to the specified path. 
+
+### 2. OpenHEXA Dataset
+When an `Output dataset` is specified, the pipeline will:
+- Check if the data has changed compared to the latest dataset version
+- Create a new version (v1, v2, v3, etc.) only if new content is detected
+- Skip versioning if the data is unchanged
+
+### 3. Database Table
+When an `Output DB table` name is provided, the extracted data will be written directly to the workspace database, replacing any existing table with the same name.
+
+### Output Data Structure
 
 The output includes a list of events with: 
 - The event id, its status and whether its been deleted or not. 
@@ -56,9 +71,6 @@ The output includes a list of events with:
 | m7t0oL3pl3G | COMPLETED | False     | 2025-08-01 00:00:00 | Fw4tCvSayjE  | Surveillance des cas | pyc3PH9jRpL        | Résultat Laboratoire    | eQe1kXL1TO6     | Xitpxgt3zyw         | VWn2r8dAWbq       | Nom du responsable de l'analyse | MANISHAKA Aimee | rdX5nU5lrcx            | HllvX50cXC0                 | rdX5nU5lrcx  | Burundi        |              |                |              |                |              |                |              |                |              |                |
 | rQDKDNF9ysg | COMPLETED | False     | 2025-08-06 00:00:00 | Fw4tCvSayjE  | Surveillance des cas | xk02Vu8vZ6l        | Notification            | mjrcwmJK0qz     | tfxSV3Bw0Ms         | d1L9O3pWfu1       | Maux de gorge                   | true            | rdX5nU5lrcx            | HllvX50cXC0                 | rdX5nU5lrcx  | Burundi        |              |                |              |                |              |                |              |                |              |                |
 
-Optionally, and if the names are provided, the code will:
-* Save the .parquet file in a OpenHEXA dataset.
-* Save the dataframe as a database table.
 
 ## Pipeline Flow
 
@@ -73,7 +85,8 @@ Optionally, and if the names are provided, the code will:
 }
 }%%
 flowchart TD
-    A[Connect to DHIS2] --> B[Fetch metadata]
+    A[Connect to DHIS2] --> A1[Validate date parameters]
+    A1 -->B[Fetch metadata]
     B --> B1[Organisation Units]
     B --> B2[Data Elements]
     B --> B3[Program Stages]
@@ -84,6 +97,6 @@ flowchart TD
     B4 --> C
     C --> D[Join metadata]
     D --> E1[Write as Parquet]
-    D --> E2[Write as DB]
-    D --> E3[Write as DataSet]
+    D -- if Output DB table --> E2[Write as DB]
+    D -- if Output dataset --> E3[Write as DataSet]
 ```

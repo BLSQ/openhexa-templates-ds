@@ -1,37 +1,43 @@
 # DHIS2 Shapes Extract
 
-The pipeline downloads geometry data from DHIS2 instances and write a geopandas file 
-to a directory in the OpenHEXA workspace.
-
-## Parameters
-
-**DHIS2 connection**  
-DHIS2 connection selection to extract the data from.
-
-**Organisation unit level**
-Organisation unit level selection from which geometries will be retrieved.
-
-**Output directory**
-Directory in OpenHEXA workspace where raw data will be saved.
-
-## Data format
-
-The pipeline downloads raw organization units metadata from the target DHIS2 and stores a formated table in the indicated output path in OpenHEXA
-workspace. 
-The output file is stored as a geodataframe format **.gpkg** and attached to the pipeline run at the end of the execution.
-
-![Data format](docs/images/data_frame_example.png)
+This pipeline extracts the geometry data from DHIS2 instances and writes it as a geopandas file.
 
 ## Example run
 
 ![Example run](docs/images/interface1.png)
+
+## Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| DHIS2 connection | DHIS2 Connection | Yes | - | The DHIS2 instance to extract data from |
+| Organisation unit level | String | No | 2 | Organisation unit level to extract geometries from |
+| Output directory | String | No | Auto-generated | Custom output file path in workspace |
+
+## Output
+
+### 1. File Output (gpkg)
+The pipeline generates a gpkg file containing the extracted organization units metadata. 
+
+- If the parameter `Output directory` is not provided, the file is saved to:
+```
+<workspace>/pipelines/dhis2_shapes_extract/shapes_level<org_level>_<timestamp>.gpkg
+```
+
+- If the parameter `Output directory` is provided, the file is saved to the specified path as shapes_level<org_level>_<timestamp>.gpkg.
+
+### Output Data Structure
+
+![Data format](docs/images/data_frame_example.png)
 
 ## Flow
 
 ```mermaid
 flowchart TD
     A([Start: Connect to DHIS2]) --> 
-    B[Transform to GeoDataFrame] --> 
-    C[Save file] --> 
-    D([End])
+    B[Fetch organisation units metadata] -->
+    C[Filter by organisation unit level] -->
+    D[Transform to GeoDataFrame] --> 
+    E[Save file] --> 
+    F([End])
 ```
