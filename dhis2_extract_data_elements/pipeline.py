@@ -1,6 +1,8 @@
 import base64
 import hashlib
+import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -15,11 +17,36 @@ from openhexa.toolbox.dhis2.dataframe import (
     extract_data_elements,
     get_category_option_combos,
     get_data_elements,
-    get_organisation_unit_groups,
     get_organisation_units,
     join_object_names,
 )
-from validate import validate_data
+
+from .validate import DataValidationError, ExpectedColumn, validate_dataframe
+
+logger = logging.getLogger(__name__)
+
+
+class LocalRun:
+    """Mock current_run for local executions."""
+
+    def log_info(self, msg: str) -> None:
+        """Mock current_run.log_info()."""
+        logger.info(msg)
+
+    def log_warning(self, msg: str) -> None:
+        """Mock current_run.log_warning()."""
+        logger.warning(msg)
+
+    def log_error(self, msg: str) -> None:
+        """Mock current_run.log_error()."""
+        logger.error(msg)
+
+    def add_file_output(self, fp: str) -> None:
+        """Mock current_run.add_file_output()."""
+        logger.info(f"File output added: {fp}")
+
+
+run = current_run or LocalRun()
 
 
 @pipeline("dhis2-extract-data-elements")
@@ -123,115 +150,339 @@ def dhis2_extract_data_elements(
     dst_file: str | None = None,
     dst_dataset: Dataset | None = None,
     dst_table: str | None = None,
-):
+) -> None:
     """Extract data elements from a DHIS2 instance and save them to a parquet file."""
-    cache_dir = Path(workspace.files_path) / ".cache"
-    dhis2 = DHIS2(connection=src_dhis2, cache_dir=cache_dir)
-
-    check_server_health(dhis2)
-
-    current_run.log_info("Reading metadata from source DHIS2 instance")
-    src_data_elements = get_data_elements(dhis2)
-    src_organisation_units = get_organisation_units(dhis2)
-    src_organisation_unit_groups = get_organisation_unit_groups(dhis2)
-    src_category_option_combos = get_category_option_combos(dhis2)
-    current_run.log_info("Sucessfully read metadata from source DHIS2 instance")
-
-    current_run.log_info("Checking data request")
+    # openhexa parameters return empty lists if not provided, we want None instead
+    if not data_elements:
+        data_elements = None
+    if not data_element_groups:
+        data_element_groups = None
+    if not organisation_units:
+        organisation_units = None
+    if not organisation_unit_groups:
+        organisation_unit_groups = None
 
     if not end_date:
         end_date = datetime.now().strftime("%Y-%m-%d")
-        current_run.log_info(f"End date not provided, using {end_date}")
 
-    where = organisation_units or organisation_unit_groups
-    if not where:
-        msg = "No organisation units or organisation unit groups provided"
-        current_run.log_error(msg)
+    params = RequestParams(
+        data_elements=data_elements,
+        data_element_groups=data_element_groups,
+        organisation_units=organisation_units,
+        organisation_unit_groups=organisation_unit_groups,
+        include_children=include_children,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    validate_parameters(params=params)
+    meta = extract_metadata(dhis2_connection=src_dhis2)
+    data = extract_data(dhis2_connection=src_dhis2, params=params)
+    data = add_names(data_values=data, metadata=meta)
+    validate(data_values=data)
+
+    if dst_file:
+        write_to_file(data_values=data, dst_file=dst_file)
+
+    if dst_dataset:
+        write_to_dataset(df=data, ds=dst_dataset)
+
+    if dst_table:
+        write_to_database(df=data, table_name=dst_table)
+
+
+@dataclass
+class Metadata:
+    """Metadata extracted from DHIS2 instance."""
+
+    data_elements: pl.DataFrame
+    organisation_units: pl.DataFrame
+    category_option_combos: pl.DataFrame
+
+
+@dataclass
+class RequestParams:
+    """Parameters for data extraction request.
+
+    Combined into a single dataclass because they are easier to pass around
+    and are pickleable for task inputs.
+    """
+
+    data_elements: list[str] | None
+    data_element_groups: list[str] | None
+    organisation_units: list[str] | None
+    organisation_unit_groups: list[str] | None
+    include_children: bool
+    start_date: str
+    end_date: str | None
+
+
+@dhis2_extract_data_elements.task
+def extract_metadata(dhis2_connection: DHIS2Connection) -> Metadata:
+    """Extract required metadata from DHIS2 instance.
+
+    Args:
+        dhis2_connection: Connection to the DHIS2 instance.
+
+    Returns:
+        Extracted metadata including data elements, organisation units, and category option combos.
+
+    """
+    cache_dir = Path(workspace.files_path) / ".cache"
+    dhis2 = DHIS2(connection=dhis2_connection, cache_dir=cache_dir)
+
+    run.log_info("Reading metadata from source DHIS2 instance")
+    data_elements = get_data_elements(dhis2)
+    organisation_units = get_organisation_units(dhis2)
+    category_option_combos = get_category_option_combos(dhis2)
+    run.log_info("Sucessfully read metadata from source DHIS2 instance")
+
+    return Metadata(
+        data_elements=data_elements,
+        organisation_units=organisation_units,
+        category_option_combos=category_option_combos,
+    )
+
+
+@dhis2_extract_data_elements.task
+def validate_parameters(
+    params: RequestParams,
+) -> bool:
+    """Validate pipeline parameters.
+
+    Returns:
+        True if parameters are valid.
+
+    Raises:
+        ValueError: If any parameter is invalid.
+
+    """
+    if not is_iso_date(params.start_date):
+        msg = f"Start date '{params.start_date}' is not in ISO format (YYYY-MM-DD)"
+        run.log_error(msg)
         raise ValueError(msg)
 
-    if data_elements:
-        data_elements = filter_objects(
-            objects_in_request=data_elements,
-            objects_in_dhis2=src_data_elements["id"].to_list(),
-            object_type="Data element",
-        )
+    if params.end_date and not is_iso_date(params.end_date):
+        msg = f"End date '{params.end_date}' is not in ISO format (YYYY-MM-DD)"
+        run.log_error(msg)
+        raise ValueError(msg)
 
-    if organisation_units:
-        organisation_units = filter_objects(
-            objects_in_request=organisation_units,
-            objects_in_dhis2=src_organisation_units["id"].to_list(),
-            object_type="Organisation unit",
-        )
+    if params.end_date and params.start_date > params.end_date:
+        msg = f"Start date '{params.start_date}' is after end date '{params.end_date}'"
+        run.log_error(msg)
+        raise ValueError(msg)
 
-    if organisation_unit_groups:
-        organisation_unit_groups = filter_objects(
-            objects_in_request=organisation_unit_groups,
-            objects_in_dhis2=src_organisation_unit_groups["id"].to_list(),
-            object_type="Organisation unit group",
-        )
+    where = params.organisation_units or params.organisation_unit_groups
+    if not where:
+        msg = "No organisation units or organisation unit groups provided"
+        run.log_error(msg)
+        raise ValueError(msg)
 
-    current_run.log_info("Starting data extraction")
+    if params.organisation_units and params.organisation_unit_groups:
+        msg = "Provide either organisation units or organisation unit groups, not both"
+        run.log_error(msg)
+        raise ValueError(msg)
 
-    if data_elements:
+    if params.organisation_unit_groups and params.include_children:
+        msg = "Include children option cannot be used with organisation unit groups"
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    what = params.data_elements or params.data_element_groups
+    if not what:
+        msg = "No data elements or data element groups provided"
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    if params.data_elements and params.data_element_groups:
+        msg = "Provide either data elements or data element groups, not both"
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    return True
+
+
+@dhis2_extract_data_elements.task
+def extract_data(
+    dhis2_connection: DHIS2Connection,
+    params: RequestParams,
+) -> pl.DataFrame:
+    """Extract data values from DHIS2 instance.
+
+    Args:
+        dhis2_connection: Connection to the DHIS2 instance.
+        params: Parameters for data extraction.
+
+    Returns:
+        Extracted data values as a Polars DataFrame.
+
+    """
+    cache_dir = Path(workspace.files_path) / ".cache"
+    dhis2 = DHIS2(connection=dhis2_connection, cache_dir=cache_dir)
+
+    run.log_info("Starting data extraction")
+
+    if params.data_elements:
         data_values = extract_data_elements(
             dhis2=dhis2,
-            data_elements=data_elements,
-            org_units=organisation_units if organisation_units else None,
-            org_unit_groups=(
-                organisation_unit_groups if organisation_unit_groups else None
-            ),
-            include_children=include_children,
-            start_date=datetime.fromisoformat(start_date),
-            end_date=datetime.fromisoformat(end_date),
+            data_elements=params.data_elements,
+            org_units=params.organisation_units,  # type: ignore
+            org_unit_groups=params.organisation_unit_groups,  # type: ignore
+            include_children=params.include_children,
+            start_date=datetime.fromisoformat(params.start_date),
+            end_date=datetime.fromisoformat(params.end_date) if params.end_date else None,
         )
 
-    elif data_element_groups:
+    elif params.data_element_groups:
         data_values = extract_data_element_groups(
             dhis2=dhis2,
-            data_element_groups=data_element_groups,
-            org_units=organisation_units if organisation_units else None,
-            org_unit_groups=(
-                organisation_unit_groups if organisation_unit_groups else None
-            ),
-            include_children=include_children,
-            start_date=datetime.fromisoformat(start_date),
-            end_date=datetime.fromisoformat(end_date),
+            data_element_groups=params.data_element_groups,
+            org_units=params.organisation_units,  # type: ignore
+            org_unit_groups=params.organisation_unit_groups,  # type: ignore
+            include_children=params.include_children,
+            start_date=datetime.fromisoformat(params.start_date),
+            end_date=datetime.fromisoformat(params.end_date) if params.end_date else None,
         )
 
     else:
         msg = "No data elements or data element groups provided"
-        current_run.log_error(msg)
+        run.log_error(msg)
         raise ValueError(msg)
 
-    current_run.log_info(f"Extracted {len(data_values)} data values")
+    run.log_info(f"Extracted {len(data_values)} data values")
 
-    current_run.log_info("Joining object names to output data")
+    return data_values
+
+
+@dhis2_extract_data_elements.task
+def add_names(
+    data_values: pl.DataFrame,
+    metadata: Metadata,
+) -> pl.DataFrame:
+    """Join object names to the extracted data values.
+
+    Args:
+        data_values: Extracted data values as a Polars DataFrame.
+        metadata: Extracted metadata including data elements, organisation units,
+            and category option combos.
+
+    Returns:
+        Data values with joined object names as a Polars DataFrame.
+
+    """
+    run.log_info("Joining object names to output data")
     data_values = join_object_names(
         df=data_values,
-        data_elements=src_data_elements,
-        organisation_units=src_organisation_units,
-        category_option_combos=src_category_option_combos,
+        data_elements=metadata.data_elements,
+        organisation_units=metadata.organisation_units,
+        category_option_combos=metadata.category_option_combos,
     )
-    current_run.log_info("Sucessfully joined object names to output data")
+    run.log_info("Sucessfully joined object names to output data")
 
-    if dst_file:
-        dst_file = Path(workspace.files_path) / dst_file
-        dst_file.parent.mkdir(parents=True, exist_ok=True)
+    return data_values
+
+
+@dhis2_extract_data_elements.task
+def validate(df: pl.DataFrame) -> None:
+    """Validate the extracted data values dataframe.
+
+    Args:
+        df: Extracted data values as a Polars DataFrame.
+    """
+    run.log_info("Validating extracted dataframe")
+    expected_columns: list[ExpectedColumn] = [
+        ExpectedColumn(name="data_element_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(name="data_element_name", type=pl.String),
+        ExpectedColumn(name="category_option_combo_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(name="category_option_combo_name", type=pl.String),
+        ExpectedColumn(name="attribute_option_combo_id", type=pl.String, n_chars=11),
+        ExpectedColumn(name="organisation_unit_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(name="period", type=pl.String, not_null=True),
+        ExpectedColumn(name="value", type=pl.String),
+        ExpectedColumn(name="created", type=pl.Datetime, not_null=True),
+        ExpectedColumn(name="last_updated", type=pl.Datetime, not_null=True),
+    ]
+
+    for lvl in range(1, 10):
+        name = f"level_{lvl}_id"
+        expected_columns.append(ExpectedColumn(name=name, type=pl.String, required=False))
+        name = f"level_{lvl}_name"
+        expected_columns.append(ExpectedColumn(name=name, type=pl.String, required=False))
+
+    try:
+        validate_dataframe(df=df, expected_columns=expected_columns)
+    except DataValidationError as e:
+        for error in e.errors:
+            run.log_error(f"{error.column_name}: {error.message}")
+        raise
+
+    run.log_info("Successfully validated extracted dataframe")
+
+
+@dhis2_extract_data_elements.task
+def write_to_file(data_values: pl.DataFrame, dst_file: str) -> Path:
+    """Write the data values dataframe to a parquet file.
+
+    Args:
+        data_values: Extracted data values as a Polars DataFrame.
+        dst_file: Destination file path.
+
+    Returns:
+        Path to the written parquet file.
+
+    """
+    dst_file_path = Path(workspace.files_path) / dst_file
+    dst_file_path.parent.mkdir(parents=True, exist_ok=True)
+    run.log_info(f"Writing data to {dst_file_path}")
+    data_values.write_parquet(dst_file_path)
+    run.add_file_output(dst_file_path.as_posix())
+    run.log_info(f"Data written to {dst_file_path}")
+    return dst_file_path
+
+
+@dhis2_extract_data_elements.task
+def write_to_dataset(df: pl.DataFrame, ds: Dataset) -> None:
+    """Add file to an OpenHEXA dataset.
+
+    Args:
+        df: DataFrame to write.
+        ds: Dataset to write to.
+
+    """
+    dst_file = default_output_path()
+    df.write_parquet(dst_file)
+
+    if ds.latest_version is not None:
+        if in_dataset_version(file=dst_file, dataset_version=ds.latest_version):
+            run.log_info("File is already in the dataset and no changes have been detected")
+            return
+
+    # increment dataset version name and create the new dataset version
+    if ds.latest_version is not None:
+        version_number = int(ds.latest_version.name.split("v")[-1])
+        version_number += 1
     else:
-        dst_file = default_output_path()
+        version_number = 1
+    dataset_version = ds.create_version(name=f"v{version_number}")
 
-    validate_data(data_values)
+    dataset_version.add_file(dst_file, "data_values.parquet")
+    run.log_info(f"File {dst_file.name} added to dataset {ds.name} {dataset_version.name}")
 
-    current_run.log_info(f"Writing data to {dst_file}")
-    data_values.write_parquet(dst_file)
-    current_run.add_file_output(dst_file.as_posix())
-    current_run.log_info(f"Data written to {dst_file}")
 
-    if dst_dataset:
-        write_to_dataset(fp=dst_file, dataset=dst_dataset)
+@dhis2_extract_data_elements.task
+def write_to_database(df: pl.DataFrame, table_name: str) -> None:
+    """Write the dataframe to a DB table.
 
-    if dst_table:
-        write_to_db(df=data_values, table_name=dst_table)
+    Args:
+        df: DataFrame to write.
+        table_name: Name of the table to write to.
+    """
+    df.write_database(
+        table_name=table_name,
+        connection=workspace.database_url,
+        if_table_exists="replace",
+    )
+    run.log_info(f"Data written to DB table {table_name}")
 
 
 def default_output_path() -> Path:
@@ -266,77 +517,6 @@ def is_iso_date(date_string: str) -> bool:
     """
     pattern = r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])$"
     return bool(re.match(pattern, date_string))
-
-
-def check_server_health(dhis2: DHIS2):
-    """Check if the DHIS2 server is responding."""
-    try:
-        dhis2.ping()
-    except ConnectionError:
-        current_run.log_error(f"Unable to reach DHIS2 instance at url {dhis2.api.url}")
-        raise
-
-
-def filter_objects(
-    objects_in_request: list[str], objects_in_dhis2: list[str], object_type: str
-) -> list[str]:
-    """Filter objects to only include those that are available in the DHIS2 instance.
-
-    Parameters
-    ----------
-    objects_in_request : list[str]
-        Objects in the data request, as a list of IDs.
-    objects_in_dhis2 : list[str]
-        Objects in the source DHIS2 instance, as a list of IDs.
-    object_type : str
-        The type of object being filtered (e.g., "data elements", "organisation units", etc.).
-        Only used for logging purposes.
-
-    Returns
-    -------
-    list[str]
-        A list of objects that are available in the DHIS2 instance.
-    """
-    filtered_objects = []
-    for obj in objects_in_request:
-        if obj not in objects_in_dhis2:
-            msg = f"{object_type} '{obj}' not found in source DHIS2 instance"
-            current_run.log_warning(msg)
-        else:
-            filtered_objects.append(obj)
-
-    return filtered_objects
-
-
-def write_to_dataset(fp: Path, dataset: Dataset):
-    """Add file to an OpenHEXA dataset.
-
-    Parameters
-    ----------
-    fp : Path
-        The path to the file to write.
-    dataset : Dataset
-        The dataset to write to.
-    """
-    if dataset.latest_version is not None:
-        if in_dataset_version(file=fp, dataset_version=dataset.latest_version):
-            current_run.log_info(
-                "File is already in the dataset and no changes have been detected"
-            )
-            return
-
-    # increment dataset version name and create the new dataset version
-    if dataset.latest_version is not None:
-        version_number = int(dataset.latest_version.name.split("v")[-1])
-        version_number += 1
-    else:
-        version_number = 1
-    dataset_version = dataset.create_version(name=f"v{version_number}")
-
-    dataset_version.add_file(fp, "data_values.parquet")
-    current_run.log_info(
-        f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}"
-    )
 
 
 def md5_from_url(url: str) -> str:
@@ -408,21 +588,3 @@ def in_dataset_version(file: Path, dataset_version: DatasetVersion) -> bool:
         if md5_file == md5_url:
             return True
     return False
-
-
-def write_to_db(df: pl.DataFrame, table_name: str) -> None:
-    """Write the dataframe to a DB table.
-
-    Parameters
-    ----------
-    df : pl.DataFrame
-        The dataframe to write.
-    table_name : str
-        The name of the table to write to.
-    """
-    df.write_database(
-        table_name=table_name,
-        connection=workspace.database_url,
-        if_table_exists="replace",
-    )
-    current_run.log_info(f"Data written to DB table {table_name}")
