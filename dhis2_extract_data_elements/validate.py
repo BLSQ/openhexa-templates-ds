@@ -116,6 +116,11 @@ def validate_dataframe(df: pl.DataFrame, expected_columns: list[ExpectedColumn])
     """
     errors: list[ErrorMessage] = []
 
+    if df.is_empty():
+        message = "The dataframe is empty."
+        errors.append(ErrorMessage(column_name="DataFrame", message=message))
+        raise DataValidationError(errors)
+
     for column in df.columns:
         if column not in [col.name for col in expected_columns]:
             message = f"Column '{column}' is not expected in the dataframe."
