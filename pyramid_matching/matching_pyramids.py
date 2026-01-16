@@ -1,6 +1,6 @@
 import config
 import polars as pl
-from matching_names import fuzz_score
+from matcher.matcher import Matcher
 
 
 def match_pyramids(
@@ -8,7 +8,7 @@ def match_pyramids(
     pyramid: pl.DataFrame,
     levels_to_match: list | None = None,
     threshold: int = 80,
-    method: str = "fuzz_ratio",
+    method: str = "fuzzy",
     matching_col_suffix: str = "_name",
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Match the locations in data with the locations in pyramid.
@@ -44,7 +44,8 @@ def match_pyramids(
     threshold : int, optional
         The threshold for the matching score. Default is 80.
     method : str, optional
-        The method to use for the matching. Default is "fuzz_ratio".
+        The method to use for the matching. Available matchers "fuzzy", "transformer", "geometry".
+        Default is "fuzz".
     matching_col_suffix: str, optional
         The suffix of the column that we will do the matching on.
 
@@ -75,6 +76,12 @@ def match_pyramids(
     list_pyramid_not_matched = []
     data_matched = pl.DataFrame()
 
+    # Initialize matcher
+    try:
+        matcher = Matcher(matcher_name=method)
+    except ValueError as e:
+        raise ValueError(f"Unknown matching method: {method}") from e
+
     for level in levels_to_match:
         print(f"Matching level {level}...")
         # I am not sure what to do, if to remove this log or to use a current_run one.
@@ -84,8 +91,8 @@ def match_pyramids(
             pyramid,
             level,
             levels_already_matched,
+            matcher,
             threshold,
-            method,
             attributes[level],
             matching_col_suffix,
         )
@@ -337,8 +344,8 @@ def _match_level(
     pyramid: pl.DataFrame,
     target_level: str,
     levels_already_matched: list,
+    matcher: Matcher,
     threshold: int,
-    method: str,
     attributes_level: dict,
     matching_col_suffix: str,
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
@@ -360,10 +367,10 @@ def _match_level(
         The level to match.
     levels_already_matched : list
         The list of levels already matched.
+    matcher : Matcher
+        The matcher to use for the matching.
     threshold : int
         The threshold for the matching score.
-    method : str
-        The method to use for the matching.
     attributes_level : dict
         The attributes to include for this level, both for data and pyramid.
     matching_col_suffix : str
@@ -386,8 +393,8 @@ def _match_level(
             pyramid,
             data,
             target_level,
+            matcher,
             threshold,
-            method,
             attributes_level,
             schema_match,
             matching_col_suffix,
@@ -404,8 +411,8 @@ def _match_level(
             pyramid_group,
             data_group,
             target_level,
+            matcher,
             threshold,
-            method,
             attributes_level,
             schema_match,
             matching_col_suffix,
@@ -458,8 +465,8 @@ def _match_level_group(
     pyramid: pl.DataFrame,
     data: pl.DataFrame,
     level: str,
+    matcher: Matcher,
     threshold: int,
-    method: str,
     attributes_level: dict,
     schema_match: list,
     matching_col_suffix: str,
@@ -476,10 +483,10 @@ def _match_level_group(
         The dataframe with the data to be matched.
     level : str
         The level to match.
+    matcher : Matcher
+        The matcher to use for the matching.
     threshold : int
         The threshold for the matching score.
-    method : str
-        The method to use for the matching.
     attributes_level : dict
         The attributes to include for this level, both for data and pyramid.
     schema_match: list
@@ -506,22 +513,19 @@ def _match_level_group(
     list_matches = []
     # The list will contain some lists with the matched names, attributes, and scores.
 
-    if method == "fuzz_ratio":
-        for name_to_match, attributes_data in data_to_match.items():
-            matches = fuzz_score(name_to_match, pyramid_to_match, threshold)
-            if matches:
-                list_matches.append(matches + attributes_data)
+    for name_to_match, attributes_data in data_to_match.items():
+        matches = matcher.match(name_to_match, pyramid_to_match, threshold)
+        if matches:
+            list_matches.append(matches + attributes_data)
 
-        if len(list_matches) > 0:
-            df_matches = pl.DataFrame(
-                list_matches,
-                schema=schema_match,
-                orient="row",
-            )
-        else:
-            df_matches = pl.DataFrame(schema=schema_match)
+    if len(list_matches) > 0:
+        df_matches = pl.DataFrame(
+            list_matches,
+            schema=schema_match,
+            orient="row",
+        )
     else:
-        raise ValueError(f"Method {method} not recognized.")
+        df_matches = pl.DataFrame(schema=schema_match)
 
     matched_data_names = df_matches[
         config.preffix_input_data + level + matching_col_suffix
