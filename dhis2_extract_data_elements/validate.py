@@ -140,7 +140,7 @@ def validate_dataframe(df: pl.DataFrame, expected_columns: list[ExpectedColumn])
             errors.append(type_error)
 
         if column.not_null:
-            not_null_error = validate_data_type(serie, column.type)
+            not_null_error = validate_not_null(serie)
             if not_null_error:
                 errors.append(not_null_error)
 
