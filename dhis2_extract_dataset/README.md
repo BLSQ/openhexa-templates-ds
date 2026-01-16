@@ -85,8 +85,7 @@ The output has a line per each of the values extracted from the dataset. For eac
 
 ## Pipeline Flow
 
-
----```mermaid
+```mermaid
 %%{init: 
 {
   "theme": "neutral",
@@ -96,14 +95,13 @@ The output has a line per each of the values extracted from the dataset. For eac
  }
 }
 }%%
-flowchart TB
+flowchart TD
     A[Connect to DHIS2]
     A --> B[Validate parameters]
-    B --> B1[Validate date parameters]
-    B1 --> B3[Transform dates to DHIS2 periods]
+    B --> B1[Validate and transform date parameters]
     B --> B2[Validate orgunit parameters]
     B1 --> C[Fetch metadata]
-    B3 --> C
+    B2 --> C
     C --> C1[Data Elements]
     C --> C2[Datasets]
     C --> C3[Organisation Units]
@@ -112,18 +110,19 @@ flowchart TB
     C2 --> D
     C3 --> D
     C4 --> D
-    D --> |If extraction fails| E[Re-try extraction]
-    E --> |If org unit provided| F1[Get list of requested org units, including children]
-    F1 --> G1[Get dataset orgunits]
-    G1 --> H1[Filter orgunits to those in both lists]
-    H1 --> I[Retry extraction]
-    E --> |If org unit groups provided| F2[Get list of requested org units from groups]
-    F2 --> G1
-    I --> J[Join metadata]
+    D -- If extraction fails --> E[Re-try extraction]
+    D -- If extraction succeeds --> J[Join metadata]
+    E -- If org unit provided --> F1[Get list of requested org units, including children]
+    E -- If org unit groups provided --> F2[Get list of requested org units from groups]
+    F1 --> G[Get dataset orgunits]
+    F2 --> G
+    G --> H[Filter orgunits to those in both lists]
+    H --> I[Retry extraction]
+    I --> J
     J --> K[Log periods with no data]
     K --> L[Log data elements with no data]
     L --> M[Write to Parquet file]  
-    L --> N|if Output dataset|[Create dataset version]
-    L --> O|if Output DB table|[Write to database table]
+    L -- if Output dataset --> N[Create dataset version]
+    L -- if Output DB table --> O[Write to database table]
 ```
 

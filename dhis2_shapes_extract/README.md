@@ -19,12 +19,12 @@ This pipeline extracts the geometry data from DHIS2 instances and writes it as a
 ### 1. File Output (gpkg)
 The pipeline generates a gpkg file containing the extracted organization units metadata. 
 
-- If the parameter `Output file` is not provided, the file is saved to:
+- If the parameter `Output directory` is not provided, the file is saved to:
 ```
 <workspace>/pipelines/dhis2_shapes_extract/shapes_level<org_level>_<timestamp>.gpkg
 ```
 
-- If the parameter `Output file` is provided, the file is saved to the specified path as shapes_level<org_level>_<timestamp>.gpkg.
+- If the parameter `Output directory` is provided, the file is saved to the specified path as shapes_level<org_level>_<timestamp>.gpkg.
 
 ### Output Data Structure
 

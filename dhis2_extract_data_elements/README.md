@@ -118,11 +118,11 @@ flowchart TD
     C3 --> D
     C4 --> D
     D --> E{Data type?}
-    E -->|Data elements| F[Extract data elements]
-    E -->|Data element groups| G[Extract data element groups]
+    E -- Data elements --> F[Extract data elements]
+    E -- Data element groups --> G[Extract data element groups]
     F --> H[Join metadata names]
     G --> H
     H --> J[Write to Parquet file]
-    H --> K|if Output dataset|[Create dataset version]
-    H --> L|if Output DB table|[Write to database table]
+    H -- if Output dataset --> K[Create dataset version]
+    H -- if Output DB table --> L[Write to database table]
 ```

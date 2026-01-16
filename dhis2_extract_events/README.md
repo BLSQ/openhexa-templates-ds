@@ -97,6 +97,6 @@ flowchart TD
     B4 --> C
     C --> D[Join metadata]
     D --> E1[Write as Parquet]
-    D --> E|if Output DB table|[Write as DB]
-    D --> E3|if Output dataset|[Write as DataSet]
+    D -- if Output DB table --> E2[Write as DB]
+    D -- if Output dataset --> E3[Write as DataSet]
 ```

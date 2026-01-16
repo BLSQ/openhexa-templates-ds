@@ -124,6 +124,6 @@ flowchart TB
     E --> F[Join metadata]
     F --> H[Validate output data]
     H --> I[Write to Parquet file]
-    H --> J|if Output dataset|[Create dataset version]
-    H --> K|if Output DB table|[Write to database table]
+    H -- If Output Dataset --> J[Create new dataset version]
+    H -- If Output DB Table --> K[Write to database table]
 ```

@@ -14,7 +14,7 @@ This pipeline extracts metadata from a DHIS2 instance, saving it as a CSV file f
 | Organisation Units | Bool | Yes | False | Whether to extract Organisation Units metadata |
 | Organisation Unit Groups | Bool | Yes | False | Whether to extract Organisation Unit Groups metadata |
 | Datasets | Bool | Yes | False | Whether to extract Dataset metadata |
-| Data Elements | Bool | Yes | False | Whether to extractData Elements metadata |
+| Data Elements | Bool | Yes | False | Whether to extract Data Elements metadata |
 | Data Element Groups | Bool | Yes | False | Whether to extract Data Element Groups metadata |
 | Category Option Combos | Bool | Yes | False | Whether to extract Category Option Combos metadata |
 | Output path | String | No | Auto-generated | Custom output file path in workspace |
@@ -22,7 +22,7 @@ This pipeline extracts metadata from a DHIS2 instance, saving it as a CSV file f
 ## Output
 
 ### 1. File Output (csv)
-The pipeline generates Parquets filex containing the extracted metadata. 
+The pipeline generates csv files containing the extracted metadata. 
 
 - If the parameter `Output file` is not provided, the files are saved to:
 ```
@@ -59,12 +59,12 @@ If the validation fails, the pipeline raises an error and stops execution.
 
 ```mermaid
 flowchart TD
-    A[Start: Connect to DHIS2] --> B1|if extract organisation units|[Extract Organisation Units]
-    A --> B3|if extract organisation unit groups|[Extract Organisation Unit Groups]
-    A --> B3|if extract dataset|[Extract Datasets]
-    A --> B4|if extract data elements|[Extract Data Elements]
-    A --> B5|if extract data element groups|[Extract Data Element Groups]
-    A --> B6|if extract category option combos|[Extract Category Option Combos]    
+    A[Start: Connect to DHIS2] -- if extract organisation units --> B1[Extract Organisation Units]
+    A -- if extract organisation unit groups --> B2[Extract Organisation Unit Groups]
+    A -- if extract dataset --> B3[Extract Datasets]
+    A -- if extract data elements --> B4[Extract Data Elements]
+    A -- if extract data element groups --> B5[Extract Data Element Groups]
+    A -- if extract category option combos --> B6[Extract Category Option Combos]    
     B1 --> C1[Format Organisation Units]
     B2 --> C2[Format Organisation Unit Groups]
     B3 --> C3[Format Datasets]
