@@ -16,7 +16,9 @@ This pipeline imports ERA5-Land aggregated data into a DHIS2 instance. It reads 
 - **DHIS2 Instance**: Target DHIS2 instance with appropriate data elements and organisation units configured
 - **Mapping Files**: JSON files mapping ERA5 variables to DHIS2 data elements (and optionally boundaries to org units)
 
-## Parameters
+## Parameters 
+
+(EM: Maybe here we can add a screenshot of the parameters?)
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
