@@ -392,7 +392,10 @@ def validate(df: pl.DataFrame) -> None:
     run.log_info("Validating extracted dataframe")
     expected_columns: list[ExpectedColumn] = [
         ExpectedColumn(name="data_element_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(name="data_element_name", type=pl.String),
         ExpectedColumn(name="category_option_combo_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(name="category_option_combo_name", type=pl.String),
+        ExpectedColumn(name="attribute_option_combo_id", type=pl.String, n_chars=11),
         ExpectedColumn(name="organisation_unit_id", type=pl.String, not_null=True, n_chars=11),
         ExpectedColumn(name="period", type=pl.String, not_null=True),
         ExpectedColumn(name="value", type=pl.String),
