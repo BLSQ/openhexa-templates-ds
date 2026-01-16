@@ -149,5 +149,5 @@ def validate_dataframe(df: pl.DataFrame, expected_columns: list[ExpectedColumn])
             if nchars_error:
                 errors.append(nchars_error)
 
-    if errors is not None:
+    if len(errors) > 0:
         raise DataValidationError(errors)
