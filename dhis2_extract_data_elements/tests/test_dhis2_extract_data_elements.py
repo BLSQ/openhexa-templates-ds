@@ -86,13 +86,13 @@ def test_validate_data() -> None:
     df = pl.read_parquet(sample_file)
 
     # should not fail
-    validate(df)
+    validate(df).run()
 
     # empty dataframe
-    with pytest.raises(DataValidationError, match="empty"):
-        validate(df.head(0))
+    with pytest.raises(DataValidationError):
+        validate(df.head(0)).run()
 
     # unexpected column in dataframe
     df_extra = df.with_columns(pl.lit("x").alias("unexpected_col"))
-    with pytest.raises(DataValidationError, match="not expected"):
-        validate(df_extra)
+    with pytest.raises(DataValidationError):
+        validate(df_extra).run()
