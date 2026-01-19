@@ -22,6 +22,7 @@ from openhexa.toolbox.dhis2.dataframe import (
 )
 from openhexa.toolbox.dhis2.periods import Period, period_from_string
 from sqlalchemy import create_engine
+from validate import validate_data
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +186,7 @@ def dhis2_extract_dataset(
         ds,
     )
     warning_post_extraction(table, ds, dataset_id, start_api, end_api)
+    validate_data(table)
     version_name = write_file(table, dhis2_name, extract_name)
     if dst_dataset:
         write_to_dataset(table, dst_dataset, version_name)
