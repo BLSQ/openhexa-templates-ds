@@ -24,178 +24,6 @@ valid_ou_groups = ["oug1", "oug2"]
 empty_ous = []
 empty_ou_groups = []
 
-datasets_pages_in = [
-    {
-        "pager": {"page": 1, "total": 3, "pageSize": 3, "pageCount": 2},
-        "dataSets": [
-            {
-                "name": "first_dataset_name",
-                "periodType": "Daily",
-                "dataSetElements": [
-                    {"dataSet": {"id": "first_dataset"}, "dataElement": {"id": "one"}},
-                    {
-                        "dataSet": {"id": "first_dataset"},
-                        "dataElement": {"id": "two"},
-                        "categoryCombo": {"id": "un"},
-                    },
-                ],
-                "indicators": [],
-                "id": "first_dataset",
-                "organisationUnits": [
-                    {"id": "ab"},
-                    {"id": "bc"},
-                    {"id": "cd"},
-                ],
-            },
-            {
-                "name": "second_dataset_name",
-                "periodType": "Quarterly",
-                "dataSetElements": [
-                    {"dataSet": {"id": "second_dataset"}, "dataElement": {"id": "three"}},
-                    {"dataSet": {"id": "second_dataset"}, "dataElement": {"id": "four"}},
-                    {
-                        "dataSet": {"id": "second_dataset"},
-                        "dataElement": {"id": "five"},
-                        "categoryCombo": {"id": "deux"},
-                    },
-                ],
-                "indicators": [
-                    {"id": "aa"},
-                    {"id": "bb"},
-                    {"id": "cc"},
-                    {"id": "dd"},
-                ],
-                "id": "second_dataset",
-                "organisationUnits": [
-                    {"id": "ef"},
-                    {"id": "fg"},
-                    {"id": "gh"},
-                    {"id": "hi"},
-                    {"id": "ij"},
-                ],
-            },
-            {
-                "name": "third_dataset_name",
-                "periodType": "Monthly",
-                "dataSetElements": [
-                    {"dataSet": {"id": "third_dataset"}, "dataElement": {"id": "six"}},
-                    {"dataSet": {"id": "third_dataset"}, "dataElement": {"id": "seven"}},
-                    {
-                        "dataSet": {"id": "third_dataset"},
-                        "dataElement": {"id": "eight"},
-                        "categoryCombo": {"id": "trois"},
-                    },
-                    {"dataSet": {"id": "third_dataset"}, "dataElement": {"id": "nine"}},
-                    {
-                        "dataSet": {"id": "third_dataset"},
-                        "dataElement": {"id": "ten"},
-                        "categoryCombo": {"id": "quatre"},
-                    },
-                ],
-                "indicators": [],
-                "id": "third_dataset",
-                "organisationUnits": [
-                    {"id": "jk"},
-                    {"id": "kl"},
-                ],
-            },
-        ],
-    },
-    {
-        "pager": {"page": 2, "total": 2, "pageSize": 3, "pageCount": 2},
-        "dataSets": [
-            {
-                "name": "fourth_dataset_name",
-                "periodType": "SixMonthly",
-                "dataSetElements": [
-                    {"dataSet": {"id": "fourth_dataset"}, "dataElement": {"id": "eleven"}}
-                ],
-                "indicators": [],
-                "id": "fourth_dataset",
-                "organisationUnits": [{"id": "mn"}],
-            },
-            {
-                "name": "fifth_dataset_name",
-                "periodType": "Yearly",
-                "dataSetElements": [
-                    {
-                        "dataSet": {"id": "fifth_dataset"},
-                        "dataElement": {"id": "twelve"},
-                        "categoryCombo": {"id": "cinq"},
-                    },
-                    {
-                        "dataSet": {"id": "fifth_dataset"},
-                        "dataElement": {"id": "thirteen"},
-                        "categoryCombo": {"id": "six"},
-                    },
-                    {
-                        "dataSet": {"id": "fifth_dataset"},
-                        "dataElement": {"id": "fourteen"},
-                        "categoryCombo": {"id": "sept"},
-                    },
-                    {
-                        "dataSet": {"id": "fifth_dataset"},
-                        "dataElement": {"id": "fifteen"},
-                        "categoryCombo": {"id": "huit"},
-                    },
-                    {"dataSet": {"id": "fifth_dataset"}, "dataElement": {"id": "sixteen"}},
-                    {
-                        "dataSet": {"id": "fifth_dataset"},
-                        "dataElement": {"id": "seventeen"},
-                        "categoryCombo": {"id": "neuf"},
-                    },
-                ],
-                "indicators": [
-                    {"id": "ee"},
-                    {"id": "ff"},
-                ],
-                "id": "fifth_dataset",
-                "organisationUnits": [
-                    {"id": "lm"},
-                ],
-            },
-        ],
-    },
-]
-
-
-datasets_pages_out = {
-    "first_dataset": {
-        "name": "first_dataset_name",
-        "data_elements": ["one", "two"],
-        "indicators": [],
-        "organisation_units": ["ab", "bc", "cd"],
-        "periodType": "Daily",
-    },
-    "second_dataset": {
-        "name": "second_dataset_name",
-        "data_elements": ["three", "four", "five"],
-        "indicators": ["aa", "bb", "cc", "dd"],
-        "organisation_units": ["ef", "fg", "gh", "hi", "ij"],
-        "periodType": "Quarterly",
-    },
-    "third_dataset": {
-        "name": "third_dataset_name",
-        "data_elements": ["six", "seven", "eight", "nine", "ten"],
-        "indicators": [],
-        "organisation_units": ["jk", "kl"],
-        "periodType": "Monthly",
-    },
-    "fourth_dataset": {
-        "name": "fourth_dataset_name",
-        "data_elements": ["eleven"],
-        "indicators": [],
-        "organisation_units": ["mn"],
-        "periodType": "SixMonthly",
-    },
-    "fifth_dataset": {
-        "name": "fifth_dataset_name",
-        "data_elements": ["twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen"],
-        "indicators": ["ee", "ff"],
-        "organisation_units": ["lm"],
-        "periodType": "Yearly",
-    },
-}
 
 before_add_cols = pl.DataFrame(
     {
@@ -220,16 +48,14 @@ before_add_cols = pl.DataFrame(
         "value": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160],
     }
 )
-dictionary_ds = {
-    "ds1": {
-        "name": "Test Dataset",
-        "periodType": "Monthly",
-    },
-    "ds2": {
-        "name": "Another Dataset",
-        "periodType": "Yearly",
-    },
-}
+df_ds_one = pl.DataFrame(
+    {
+        "id": ["ds1"],
+        "name": ["Test Dataset"],
+        "period_type": ["Monthly"],
+        "data_elements": [["de3", "de4", "de5", "de6", "de7"]],
+    }
+)
 after_add_cols = pl.DataFrame(
     {
         "period": [
@@ -294,11 +120,6 @@ missing_periods = ["202304", "202307", "202309"]
 extra_periods = ["202301", "202311"]
 missing_des = ["de6", "de7"]
 extra_des = ["de1", "de2"]
-dictionary_ds_one = {
-    "name": "Test Dataset",
-    "periodType": "Monthly",
-    "data_elements": ["de3", "de4", "de5", "de6", "de7"],
-}
 
 
 pyramid = pl.DataFrame(

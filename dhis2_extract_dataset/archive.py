@@ -183,3 +183,49 @@ def period_to_period_type(period: str) -> str:
         return "Weekly" + anchor
 
     raise ValueError(f"Unrecognized DHIS2 period format: {period}")
+
+
+def get_dataset_org_units(dhis: DHIS2, dataset_id: str) -> list[str]:
+    """Retrieve the list of organization unit IDs associated with a given dataset.
+
+    Args:
+        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
+        dataset_id (str): The ID of the dataset.
+
+    Returns:
+        list[str]: A list of organization unit IDs linked to the specified dataset.
+    """
+    params = {"fields": "organisationUnits[id]"}
+    response = dhis.api.get(f"dataSets/{dataset_id}.json", params=params)
+    return [ou["id"] for ou in response.get("organisationUnits", [])]
+
+
+def get_datasets_as_dict(dhis: DHIS2) -> dict[str, dict]:
+    """Get datasets metadata.
+
+    Args:
+    ----
+    dhis (DHIS2): The DHIS2 connection object.
+
+    Returns:
+    -------
+    dict[dict] : dictionnary of dict Id, name, data elements, indicators and org units of all
+    datasets.
+    """
+    datasets = {}
+    for page in dhis.api.get_paged(
+        "dataSets",
+        params={
+            "fields": "id,name,dataSetElements,indicators,organisationUnits,periodType",
+            "pageSize": 10,
+        },
+    ):
+        for ds in page["dataSets"]:
+            ds_id = ds.get("id")
+            row = datasets.setdefault(ds_id, {})
+            row["name"] = ds.get("name")
+            row["data_elements"] = [dx["dataElement"]["id"] for dx in ds["dataSetElements"]]
+            row["indicators"] = [indicator["id"] for indicator in ds["indicators"]]
+            row["organisation_units"] = [ou["id"] for ou in ds["organisationUnits"]]
+            row["periodType"] = ds["periodType"]
+    return datasets

@@ -16,6 +16,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     extract_dataset,
     get_category_option_combos,
     get_data_elements,
+    get_datasets,
     get_organisation_units,
     join_object_names,
 )
@@ -53,7 +54,7 @@ run = current_run or LocalRun()
     "dhis_con",
     name="DHIS2 Connection",
     type=DHIS2Connection,
-    default="dhis2-snis",
+    # default="dhis2-snis",
     required=True,
 )
 @parameter(
@@ -63,8 +64,7 @@ run = current_run or LocalRun()
     widget=DHIS2Widget.DATASETS,
     connection="dhis_con",
     required=True,
-    # default=None,
-    default="Qa7YLSayXse",
+    # default="Qa7YLSayXse",
 )
 @parameter(
     "start",
@@ -72,7 +72,7 @@ run = current_run or LocalRun()
     help="ISO format: yyyy-mm-dd",
     type=str,
     required=True,
-    default="2025-05-17",
+    # default="2025-05-17",
 )
 @parameter(
     "end",
@@ -80,7 +80,7 @@ run = current_run or LocalRun()
     help="ISO format: yyyy-mm-dd. Today by default",
     type=str,
     required=False,
-    default="2025-05-18",
+    # default="2025-05-18",
 )
 @parameter(
     code="dst_dataset",
@@ -105,7 +105,7 @@ run = current_run or LocalRun()
     type=str,
     multiple=True,
     required=False,
-    # default=["rdX5nU5lrcx"],
+    # default=["h0s5E6VKCB2"],
 )
 @parameter(
     "include_children",
@@ -123,14 +123,14 @@ run = current_run or LocalRun()
     type=str,
     multiple=True,
     required=False,
-    default=["cjOdrB3cs7w"],
+    # default=["pspCxQqWRGZ"],
 )
 @parameter(
     "max_nb_ou_extracted",
     name="Optional: Maximum number of orgunits per request",
     type=int,
     required=False,
-    default=50,
+    # default=50,
     help="This parameter is used to limit the number of orgunits per request.",
 )
 def dhis2_extract_dataset(
@@ -155,10 +155,11 @@ def dhis2_extract_dataset(
     start = valid_date(start)
     end = valid_date(end)
     dhis2_name = get_dhis2_name_domain(dhis_con)
-    ds = get_datasets_as_dict(dhis)
+    all_ds = get_datasets(dhis)
+    ds = all_ds.filter(pl.col("id") == dataset_id)
     validate_ous_parameters(ou_ids, ou_group_ids)
-    start_api = isodate_to_period_type(start, ds[dataset_id]["periodType"])
-    end_api = isodate_to_period_type(end, ds[dataset_id]["periodType"])
+    start_api = isodate_to_period_type(start, ds["period_type"].item())
+    end_api = isodate_to_period_type(end, ds["period_type"].item())
     pyramid = get_organisation_units(dhis)
     des = get_data_elements(dhis)
     cocs = get_category_option_combos(dhis)
@@ -182,7 +183,6 @@ def dhis2_extract_dataset(
     table = add_ds_information(
         data_values,
         ds,
-        dataset_id,
     )
     warning_post_extraction(table, ds, dataset_id, start_api, end_api)
     version_name = write_file(table, dhis2_name, extract_name)
@@ -195,21 +195,20 @@ def dhis2_extract_dataset(
 
 def add_ds_information(
     data_values: pl.DataFrame,
-    ds: dict,
-    ds_id: str,
+    ds: pl.DataFrame,
 ) -> pl.DataFrame:
     """Adds dataset information to the extracted data values.
 
     Args:
         data_values (pl.DataFrame): The extracted data values.
-        ds (dict): Dictionary containing dataset information.
-        ds_id (str): The dataset ID.
+        ds (pl.Dataframe): Dataframe containing the dataset information.
+
 
     Returns:
         pl.DataFrame: The data values with added dataset information.
     """
-    dataset_name = ds[ds_id]["name"]
-    dataset_period_type = ds[ds_id]["periodType"]
+    dataset_name = ds["name"].item()
+    dataset_period_type = ds["period_type"].item()
 
     if data_values.height > 0:
         data_values = data_values.with_columns(
@@ -300,23 +299,22 @@ def write_file(table: pl.DataFrame, dhis2_name: str, extract_name: str | None) -
 
     # Format timestamp
     now = datetime.now()
-    date_time = now.strftime("%m/%d/%Y, %H:%M:%S")
+    date_time = now.strftime("%m/%d/%Y_%H:%M:%S")
     if extract_name is None:
         version_name = date_time
     else:
         version_name = date_time + "-" + extract_name
     version_name = version_name.replace("/", "-")
     output_path = (
-        f"{workspace.files_path}/pipelines/dhis2_extract_dataset/"
-        f"{dhis2_name}/{dataset_name}/{version_name}"
+        f"{workspace.files_path}/pipelines/dhis2_extract_dataset/{dhis2_name}/{dataset_name}"
     )
     Path.mkdir(Path(output_path), parents=True, exist_ok=True)
 
-    table.write_csv(f"{output_path}.csv")
-    table.write_parquet(f"{output_path}.parquet")
+    table.write_csv(f"{output_path}/{version_name}.csv")
+    table.write_parquet(f"{output_path}/{version_name}.parquet")
 
-    run.add_file_output(f"{output_path}.csv")
-    run.add_file_output(f"{output_path}.parquet")
+    run.add_file_output(f"{output_path}/{version_name}.csv")
+    run.add_file_output(f"{output_path}/{version_name}.parquet")
 
     return version_name
 
@@ -357,20 +355,20 @@ def write_to_db(table: pl.DataFrame, table_name: str):
 
 # @dhis2_extract_dataset.task
 def warning_post_extraction(
-    table: pl.DataFrame, datasets: dict, dataset_id: str, start: Period, end: Period
+    table: pl.DataFrame, dataset: pl.DataFrame, dataset_id: str, start: Period, end: Period
 ):
     """Check for warnings in the extracted data.
 
     Args:
         table (pl.DataFrame): The extracted data.
-        datasets (dict): Dictionary containing dataset information.
+        dataset (pl.DataFrame): DataFrame containing the dataset information.
         dataset_id (str): List of dataset IDs.
         start (str): Start date of the extraction.
         end (str): End date of the extraction.
     """
     if len(table) > 0:
-        get_periods_with_no_data(table, start, end, datasets[dataset_id])
-        get_dataelements_with_no_data(table, datasets[dataset_id])
+        get_periods_with_no_data(table, start, end, dataset)
+        get_dataelements_with_no_data(table, dataset)
 
 
 # @dhis2_extract_dataset.task
@@ -443,21 +441,6 @@ def valid_date(date_str: str | None) -> str:
     raise ValueError(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")
 
 
-def get_dataset_org_units(dhis: DHIS2, dataset_id: str) -> list[str]:
-    """Retrieve the list of organization unit IDs associated with a given dataset.
-
-    Args:
-        dhis (DHIS2): The DHIS2 client object used to interact with the DHIS2 API.
-        dataset_id (str): The ID of the dataset.
-
-    Returns:
-        list[str]: A list of organization unit IDs linked to the specified dataset.
-    """
-    params = {"fields": "organisationUnits[id]"}
-    response = dhis.api.get(f"dataSets/{dataset_id}.json", params=params)
-    return [ou["id"] for ou in response.get("organisationUnits", [])]
-
-
 def fetch_dataset_data_for_valid_descendants(
     dhis: DHIS2,
     pyramid: pl.DataFrame,
@@ -466,6 +449,7 @@ def fetch_dataset_data_for_valid_descendants(
     include_children: bool,
     start_date: datetime,
     end_date: datetime,
+    ds: pl.DataFrame,
 ) -> pl.DataFrame:
     """Fetch dataset data for valid descendant organization units.
 
@@ -481,12 +465,13 @@ def fetch_dataset_data_for_valid_descendants(
         include_children (bool): Whether to include child organizational units.
         start_date (str): The start date for data extraction.
         end_date (str): The end date for data extraction.
+        ds (pl.DataFrame): Dataframe containing the dataset metadata,
 
     Returns:
         pl.DataFrame: The extracted dataset data for the valid descendant organization units.
     """
     all_descendants = get_descendants(all_ous, include_children, pyramid)
-    dataset_org_units = get_dataset_org_units(dhis, dataset_id)
+    dataset_org_units = ds["organisation_units"].item()
     valid_org_units = [ou for ou in all_descendants if ou in dataset_org_units]
 
     try:
@@ -538,6 +523,7 @@ def fetch_dataset_data_for_valid_group_orgunits(
     org_unit_group_ids: list[str],
     start_date: datetime,
     end_date: datetime,
+    ds: pl.DataFrame,
 ) -> pl.DataFrame:
     """Fetch dataset data for valid organization units that belong to specified org unit groups.
 
@@ -551,6 +537,7 @@ def fetch_dataset_data_for_valid_group_orgunits(
         org_unit_group_ids (list[str]): List of organization unit group IDs.
         start_date (datetime): The start date for data extraction.
         end_date (datetime): The end date for data extraction.
+        ds (pl.DataFrame): Dataframe containing the dataset metadata,
 
     Returns:
         pl.DataFrame: The extracted dataset data for the valid organization units in the specified
@@ -559,7 +546,7 @@ def fetch_dataset_data_for_valid_group_orgunits(
     Raises:
         Exception: If fetching dataset org units or extracting the dataset fails.
     """
-    dataset_org_units = get_dataset_org_units(dhis, dataset_id)
+    dataset_org_units = ds["organisation_units"].item()
     ous = get_ous_from_groups(dhis, org_unit_group_ids)
     valid_ous = [ou for ou in ous if ou in dataset_org_units]
 
@@ -604,7 +591,7 @@ def extract_raw_data(
     dhis: DHIS2,
     pyramid: pl.DataFrame,
     dataset_id: str,
-    datasets: dict,
+    datasets: pl.DataFrame,
     start: Period,
     end: Period,
     ou_ids: list[str],
@@ -617,8 +604,8 @@ def extract_raw_data(
         dhis (DHIS2): DHIS2 client object used to interact with the DHIS2 API.
         pyramid (pl.DataFrame): A Polars DataFrame representing the organisational unit hierarchy.
         dataset_id (str): dataset ID to extract data from.
-        datasets (dict): Dictionary containing dataset information, including data elements and
-        organisation units.
+        datasets (pl.Dataframe): Dataframe containing the dataset metadata,
+        including data elements and organisation units.
         start (str): Start date of the time range to extract data from.
         end (str): End date of the time range to extract data from.
         ou_ids (list[str] | None): List of organization unit IDs or None.
@@ -629,8 +616,8 @@ def extract_raw_data(
         pl.DataFrame: Pandas DataFrame containing the extracted raw data, with additional columns
         for dataset name and period type.
     """
-    dataset_name = datasets[dataset_id]["name"]
-    dataset_period_type = datasets[dataset_id]["periodType"]
+    dataset_name = datasets["name"].item()
+    dataset_period_type = datasets["period_type"].item()
     run.log_info(f"Extracting data for dataset {dataset_name}")
     run.log_info(f"Period type: {dataset_period_type}")
 
@@ -661,6 +648,7 @@ def extract_raw_data(
                 include_children=include_children,
                 start_date=start.datetime,
                 end_date=end.datetime,
+                ds=datasets,
             )
         elif isinstance(ou_group_ids, list) and len(ou_group_ids) > 0:
             run.log_info(
@@ -672,6 +660,7 @@ def extract_raw_data(
                 org_unit_group_ids=ou_group_ids,
                 start_date=start.datetime,
                 end_date=end.datetime,
+                ds=datasets,
             )
         else:
             run.log_error(
@@ -801,14 +790,14 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
     return period_from_string(period_str)
 
 
-def get_periods_with_no_data(data: pl.DataFrame, start: Period, end: Period, dataset: dict):
+def get_periods_with_no_data(data: pl.DataFrame, start: Period, end: Period, dataset: pl.DataFrame):
     """Checks if there are differences between the expected periods and the extracted periods.
 
     Args:
-        data (pl.DataFrame): The extracted data.
+        data (pl.DataFrame): The extracted data.9
         start (str): Start date in ISO format.
         end (str): End date in ISO format.
-        dataset (dict): The dataset metadata.
+        dataset (pl.DataFrame): The dataset metadata.
     """
     if start != end:
         expected_periods = [str(p) for p in start.range(end)]
@@ -820,7 +809,7 @@ def get_periods_with_no_data(data: pl.DataFrame, start: Period, end: Period, dat
     missing_periods = [p for p in expected_periods if p not in extracted_periods]
     unexpected_periods = [p for p in extracted_periods if p not in expected_periods]
 
-    dataset_name = dataset["name"]
+    dataset_name = dataset["name"].item()
     if len(missing_periods) > 0:
         run.log_warning(
             f"Following periods have no data: {sorted(missing_periods)} for dataset {dataset_name}"
@@ -833,21 +822,21 @@ def get_periods_with_no_data(data: pl.DataFrame, start: Period, end: Period, dat
         )
 
 
-def get_dataelements_with_no_data(data: pl.DataFrame, dataset: dict):
+def get_dataelements_with_no_data(data: pl.DataFrame, dataset: pl.DataFrame):
     """Checks if there are differences between the expected and the extracted dataElements.
 
     Args:
         data (pl.DataFrame): The extracted data.
-        dataset (dict): The dataset metadata.
+        dataset (pl.DataFrame): The dataset metadata.
 
     """
-    expected_des = dataset["data_elements"]
+    expected_des = dataset["data_elements"].item()
     extracted_des = data["data_element_id"].unique()
 
     missing_des = [p for p in expected_des if p not in extracted_des]
     unexpected_des = [p for p in extracted_des if p not in expected_des]
 
-    dataset_name = dataset["name"]
+    dataset_name = dataset["name"].item()
     if len(missing_des) > 0:
         run.log_warning(
             f"Following dataElements have no data: {sorted(missing_des)} for dataset {dataset_name}"
@@ -858,37 +847,6 @@ def get_dataelements_with_no_data(data: pl.DataFrame, dataset: dict):
             "Following dataElements not expected, but found: "
             f"{sorted(unexpected_des)} for dataset {dataset_name}"
         )
-
-
-def get_datasets_as_dict(dhis: DHIS2) -> dict[str, dict]:
-    """Get datasets metadata.
-
-    Args:
-    ----
-    dhis (DHIS2): The DHIS2 connection object.
-
-    Returns:
-    -------
-    dict[dict] : dictionnary of dict Id, name, data elements, indicators and org units of all
-    datasets.
-    """
-    datasets = {}
-    for page in dhis.api.get_paged(
-        "dataSets",
-        params={
-            "fields": "id,name,dataSetElements,indicators,organisationUnits,periodType",
-            "pageSize": 10,
-        },
-    ):
-        for ds in page["dataSets"]:
-            ds_id = ds.get("id")
-            row = datasets.setdefault(ds_id, {})
-            row["name"] = ds.get("name")
-            row["data_elements"] = [dx["dataElement"]["id"] for dx in ds["dataSetElements"]]
-            row["indicators"] = [indicator["id"] for indicator in ds["indicators"]]
-            row["organisation_units"] = [ou["id"] for ou in ds["organisationUnits"]]
-            row["periodType"] = ds["periodType"]
-    return datasets
 
 
 if __name__ == "__main__":
