@@ -1,15 +1,18 @@
 import config
 import polars as pl
 from matcher.matcher import Matcher
+from openhexa.sdk.pipelines.run import CurrentRun
 
 
 def match_pyramids(
     data: pl.DataFrame,
     pyramid: pl.DataFrame,
+    logger: CurrentRun | None = None,
     levels_to_match: list | None = None,
-    threshold: int = 80,
-    method: str = "fuzzy",
     matching_col_suffix: str = "_name",
+    method: str = "fuzzy",
+    threshold: int = 80,
+    scorer_method_fuzzy: str = "WRatio",
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     """Match the locations in data with the locations in pyramid.
 
@@ -28,6 +31,12 @@ def match_pyramids(
     (c) We will do the matching in the columns that have the suffix specified in
     matching_col_suffix.
 
+    It returns 4 dataframes:
+    - The matched data, with all the information.
+    - The simplified matched data, with only the matching columns and no extra information.
+    - The data that could not be matched.
+    - The pyramid locations that were not matched.
+
     Parameters
     ----------
     data : pl.DataFrame
@@ -38,16 +47,27 @@ def match_pyramids(
         The dataframe with the pyramid to match against.
         The column matching should be (for the level _alpha_) level_alpha_matching, level_alpha_id,
         level_alpha_attribute1, ...
-    levels_to_match : list
+    logger : CurrentRun, optional
+        The logger to use for logging information during the matching process.
+        If None, no logging will be done.
+    levels_to_match : list, optional
         The list of levels to match. The levels should be in the order from higher to lower
         in the pyramid (e.g., ["level_2", "level_3"]).
-    threshold : int, optional
-        The threshold for the matching score. Default is 80.
-    method : str, optional
-        The method to use for the matching. Available matchers "fuzzy", "transformer", "geometry".
-        Default is "fuzz".
+        If None, the levels will be detected automatically by looking for columns in the
+        data and pyramid dataframes that end with the matching_col_suffix.
     matching_col_suffix: str, optional
         The suffix of the column that we will do the matching on.
+        Default is "_name".
+    method : str, optional
+        The method to use for the matching. For now, the only available matcher is "fuzzy".
+        (but we will add more in the future).
+        Default is "fuzzy".
+    threshold : int, optional
+        The threshold for the matching score. Default is 80.
+    scorer_method_fuzzy : str, optional
+        The scorer method to use for the fuzzy matching. Only will be used if method=="fuzzy".
+        Default is "WRatio".
+
 
     Returns
     -------
@@ -65,6 +85,8 @@ def match_pyramids(
 
     if levels_to_match is None:
         levels_to_match = _get_levels_to_match(data, pyramid, matching_col_suffix)
+        if logger:
+            logger.log_info(f"Detected levels to match: {levels_to_match}")
     else:
         _check_levels(data, pyramid, levels_to_match, matching_col_suffix)
         levels_to_match.sort()
@@ -78,12 +100,17 @@ def match_pyramids(
 
     # Initialize matcher
     try:
-        matcher = Matcher(matcher_name=method)
+        matcher = Matcher(
+            matcher_name=method, threshold=threshold, scorer_fuzzy=scorer_method_fuzzy
+        )
+        if logger:
+            logger.log_info(f"Using matcher: {matcher!s}")
     except ValueError as e:
         raise ValueError(f"Unknown matching method: {method}") from e
 
     for level in levels_to_match:
-        print(f"Matching level {level}...")
+        if logger:
+            logger.log_info(f"Matching level {level}...")
         # I am not sure what to do, if to remove this log or to use a current_run one.
         data_matched, data_no_match_level, pyramid_no_match_level = _match_level(
             data_matched,
@@ -92,7 +119,6 @@ def match_pyramids(
             level,
             levels_already_matched,
             matcher,
-            threshold,
             attributes[level],
             matching_col_suffix,
         )
@@ -333,7 +359,6 @@ def _get_levels_to_match(
 
     actual_levels = list(levels_in_data.intersection(levels_in_pyramid))
     actual_levels.sort()
-    print(f"Detected levels to match: {actual_levels}")
 
     return actual_levels
 
@@ -345,7 +370,6 @@ def _match_level(
     target_level: str,
     levels_already_matched: list,
     matcher: Matcher,
-    threshold: int,
     attributes_level: dict,
     matching_col_suffix: str,
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
@@ -369,8 +393,6 @@ def _match_level(
         The list of levels already matched.
     matcher : Matcher
         The matcher to use for the matching.
-    threshold : int
-        The threshold for the matching score.
     attributes_level : dict
         The attributes to include for this level, both for data and pyramid.
     matching_col_suffix : str
@@ -394,7 +416,6 @@ def _match_level(
             data,
             target_level,
             matcher,
-            threshold,
             attributes_level,
             schema_match,
             matching_col_suffix,
@@ -412,7 +433,6 @@ def _match_level(
             data_group,
             target_level,
             matcher,
-            threshold,
             attributes_level,
             schema_match,
             matching_col_suffix,
@@ -466,7 +486,6 @@ def _match_level_group(
     data: pl.DataFrame,
     level: str,
     matcher: Matcher,
-    threshold: int,
     attributes_level: dict,
     schema_match: list,
     matching_col_suffix: str,
@@ -485,8 +504,6 @@ def _match_level_group(
         The level to match.
     matcher : Matcher
         The matcher to use for the matching.
-    threshold : int
-        The threshold for the matching score.
     attributes_level : dict
         The attributes to include for this level, both for data and pyramid.
     schema_match: list
@@ -514,7 +531,7 @@ def _match_level_group(
     # The list will contain some lists with the matched names, attributes, and scores.
 
     for name_to_match, attributes_data in data_to_match.items():
-        matches = matcher.match(name_to_match, pyramid_to_match, threshold)
+        matches = matcher.match(name_to_match, pyramid_to_match)
         if matches:
             list_matches.append(matches + attributes_data)
 
