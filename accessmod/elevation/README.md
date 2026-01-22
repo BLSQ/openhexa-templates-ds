@@ -1,7 +1,7 @@
 # Elevation pipeline
 
 
-This pipeline retrieves elevation data from the **Copernicus Digital Elevation Model (DEM)** and produces a **cropped elevation-derived raster** based on a user-defined geometry of interest. In addition to extracting elevation data, the pipeline **computes slope** and outputs a single raster file.<br>
+This pipeline retrieves elevation data from the **Copernicus Digital Elevation Model (DEM)** and produces a **cropped elevation-derived raster** and a **slope raster** based on a user-defined geometry of interest. All computations are performed on the geometry of interest expanded by a geographic buffer (to ensure full spatial coverage and avoid edge effects).<br>
 It is part of the data extraction stage of a larger accessibility pipeline (for now called accessmod).
 
 
@@ -35,22 +35,22 @@ It is part of the data extraction stage of a larger accessibility pipeline (for 
 
 🚧 Note: the input format may evolve in future versions of the pipeline.
 
-### Output file name 
+### Output directory
 
-*Output file path*: (optional) path of the ouput raster file. If not defined, the ouput file will be stored in a folder named based on the date of execution, and will be named landcover.tif. 
+*Output directory path*: (optional) path of the ouput directory. If not defined, the output files will be stored in a folder named based on the date of execution.
 
 ```
-pipelines/
-└── accessmod/
-    └── landcover/
-        └── YYYY-MM-DD_HH-MM-SS/
-            └── landcover.tif
+└── elevation/
+    └── YYYY-MM-DD_HH-MM-SS/
+        └── elevation.tif
+        └── slope.tif
+        └── buffered_geom.gpkg
 ```
 
 
-## Output file
+## Output files
 
-The output file is a single-band GeoTIFF raster, in EPSG:4326, where pixel correspond to a slope value (calculated using gdal.DEMProcessing).
+The output files are both a single-band GeoTIFF raster, in EPSG:4326, where pixel correspond to either the elevation, or the slope value (calculated using gdal.DEMProcessing).
 
 
 ## Requirements and dependencies 
