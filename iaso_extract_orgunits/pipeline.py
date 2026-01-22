@@ -94,7 +94,7 @@ def iaso_extract_orgunits(
     output_file_name: str | None,
     output_format: str,
     db_table_name: str | None,
-    save_mode: str,
+    save_mode: str | None,
     dataset: Dataset | None,
 ) -> None:
     """Extract and export organizational units data from IASO platform.
@@ -341,7 +341,7 @@ def export_to_file(
 def export_to_database(
     org_units_df: pl.DataFrame,
     table_name: str | None,
-    save_mode: Literal["replace", "append"] | None,
+    save_mode: Literal["replace", "append"],
 ) -> None:
     """Export organizational units data to spatial database.
 
@@ -361,7 +361,7 @@ def export_to_database(
     try:
         geo_df = _prepare_geodataframe(org_units_df)
 
-        engine = create_engine(workspace.database_url)
+        engine = create_engine(workspace.database_url)  # type: ignore
         save_mode = save_mode or "replace"
         geo_df.to_postgis(table_name, engine, if_exists=save_mode, index=False)
 
@@ -395,7 +395,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
             f"`{latest_version.name}` and no changes have been detected"
         )
         return
-    
+
     if (
         file_path.suffix == ".shp"
         and bool(latest_version)
