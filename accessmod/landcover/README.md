@@ -29,22 +29,22 @@ It is part of the data extraction stage of a larger accessibility pipeline (for 
 
 🚧 Note: the input format may evolve in future versions of the pipeline.
 
-### Output file name 
+### Output directory
 
-*Output file path*: (optional) path of the ouput raster file. If not defined, the ouput file will be stored in a folder named based on the date of execution, and will be named landcover.tif. 
+*Output directory path*: (optional) path of the ouput directory. If not defined, the output files will be stored in a folder named based on the date of execution. 
 
 ```
-pipelines/
-└── accessmod/
-    └── landcover/
-        └── YYYY-MM-DD_HH-MM-SS/
-            └── landcover.tif
+└── landcover/
+    └── YYYY-MM-DD_HH-MM-SS/
+        └── landcover.tif
+        └── buffered_geom.tif
 ```
 
 
 ## Output file
 
 The output file is a single-band GeoTIFF raster, with the same spec as ESA data (resolution: 10m and CRS: EPSG4326), where pixel values correspond to one of the 11 classes:
+
 | Value | Class description |
 |------:|-------------------|
 | 10 | Tree cover |
