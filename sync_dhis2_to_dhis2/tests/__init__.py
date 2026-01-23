@@ -1,0 +1,1 @@
+"""Tests for sync_dhis2_to_dhis2 pipeline."""
