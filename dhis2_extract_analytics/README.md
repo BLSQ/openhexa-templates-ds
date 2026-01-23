@@ -2,7 +2,7 @@
 
 ## Description
 
-This pipeline extracts analytics data from a DHIS2 instance, including data elements, indicators, and their associated metadata. The extracted data is processed and saved as a Parquet file for further analysis.
+This pipeline extracts analytics data from a DHIS2 instance, including data elements, data element groups, indicators and indicator groups; including their associated metadata. The extracted data is processed and saved as a Parquet file for further analysis and optionally into a dataset and a database. 
 
 ## Example usage
 
@@ -41,13 +41,15 @@ Multiple parameters per dimension are not allowed. For example, you cannot speci
 The pipeline supports three output options that can be used individually or in combination:
 
 ### 1. File Output (Parquet)
-By default, the pipeline generates a Parquet file containing the extracted analytics data with enriched metadata. The file is saved to:
+The pipeline generates a Parquet file containing the extracted analytics data with enriched metadata. 
 
+- If the parameter `Output file` is not provided, the file is saved to:
 ```
 <workspace>/pipelines/dhis2_extract_analytics/<timestamp>/data_values.parquet
 ```
 
-You can specify a custom output path using the `Output file` parameter.
+- If the parameter `Output file` is provided, the file is saved to the specified path. 
+
 
 ### 2. OpenHEXA Dataset
 When an `Output dataset` is specified, the pipeline will:
@@ -86,6 +88,15 @@ The output includes:
 └──────────────┴───────────────────────────────────────┴──────────────────────┴────────┴───────┴─────────────┴─────────────┴─────────────┴─────────────┴──────────────┴──────────────┴──────────────┴─────────────────┘
 ```
 
+## Validation
+
+The output data is validated; checking that:
+- The DataFrame is not empty
+- All required columns are present
+- Columns have the expected data types
+- Certain columns have no null values
+If the validation fails, the pipeline raises an error and stops execution.
+
 ## Pipeline Flow
 
 ```mermaid
@@ -101,10 +112,18 @@ The output includes:
 flowchart TB
     A[Connect to DHIS2]
     A --> C[Fetch metadata]
-    C --> D[Validate request parameters]
+    C --> C1[Data Elements]
+    C --> C2[Indicators]
+    C --> C3[Organisation Units]
+    C --> C4[Category Option Combos]
+    C1 --> D[Validate request parameters]
+    C2 --> D
+    C3 --> D
+    C4 --> D
     D --> E[Extract analytics data]
     E --> F[Join metadata]
-    F --> H[Write to Parquet file]
-    F --> I[Create dataset version]
-    F --> J[Write to database table]
+    F --> H[Validate output data]
+    H --> I[Write to Parquet file]
+    H -- If Output Dataset --> J[Create new dataset version]
+    H -- If Output DB Table --> K[Write to database table]
 ```
