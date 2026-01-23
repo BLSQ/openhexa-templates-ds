@@ -1,12 +1,20 @@
 import sys
+import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import config
 import polars as pl
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pipeline import clean_string, export_to_file, format_form_metadata
+from pipeline import (
+    DatasetVersion,
+    clean_string,
+    export_to_file,
+    format_form_metadata,
+    in_dataset_version,
+)
 
 
 def test_clean_string():
@@ -80,3 +88,85 @@ def test_export_to_file(tmp_path: Path):
     assert read_choices_xlsx.sort(["name", "choice_value"]).equals(
         config.choices_read.sort(["name", "choice_value"])
     )
+
+
+def test_in_dataset_version_file_exists() -> None:
+    """Test that a file is found in the dataset version when hashes match."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = Path(tmp_dir) / "test_file.txt"
+        test_content = b"Test content for dataset version"
+        test_file.write_bytes(test_content)
+
+        # Mock DatasetVersion and file
+        mock_file = MagicMock()
+        mock_file.read.return_value = test_content
+
+        mock_dataset_version = MagicMock(spec=DatasetVersion)
+        mock_dataset_version.files = [mock_file]
+
+        result = in_dataset_version(test_file, mock_dataset_version)
+
+        assert result is True
+        mock_file.read.assert_called_once()
+
+
+def test_in_dataset_version_file_not_exists() -> None:
+    """Test that a file is not found when hashes don't match."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = Path(tmp_dir) / "test_file.txt"
+        test_content = b"Test content"
+        test_file.write_bytes(test_content)
+
+        # Mock DatasetVersion with different file content
+        mock_file = MagicMock()
+        mock_file.read.return_value = b"Different content"
+
+        mock_dataset_version = MagicMock(spec=DatasetVersion)
+        mock_dataset_version.files = [mock_file]
+
+        result = in_dataset_version(test_file, mock_dataset_version)
+
+        assert result is False
+
+
+def test_in_dataset_version_empty_dataset() -> None:
+    """Test with an empty dataset version (no files)."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = Path(tmp_dir) / "test_file.txt"
+        test_file.write_bytes(b"Test content")
+
+        mock_dataset_version = MagicMock(spec=DatasetVersion)
+        mock_dataset_version.files = []
+
+        result = in_dataset_version(test_file, mock_dataset_version)
+
+        assert result is False
+
+
+def test_in_dataset_version_multiple_files() -> None:
+    """Test with multiple files in dataset version, matching the last one."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = Path(tmp_dir) / "test_file.txt"
+        test_content = b"Matching content"
+        test_file.write_bytes(test_content)
+
+        # Mock multiple files, with the last one matching
+        mock_file1 = MagicMock()
+        mock_file1.read.return_value = b"First file content"
+
+        mock_file2 = MagicMock()
+        mock_file2.read.return_value = b"Second file content"
+
+        mock_file3 = MagicMock()
+        mock_file3.read.return_value = test_content
+
+        mock_dataset_version = MagicMock(spec=DatasetVersion)
+        mock_dataset_version.files = [mock_file1, mock_file2, mock_file3]
+
+        result = in_dataset_version(test_file, mock_dataset_version)
+
+        assert result is True
+        # Verify that we checked files until we found a match
+        mock_file1.read.assert_called_once()
+        mock_file2.read.assert_called_once()
+        mock_file3.read.assert_called_once()
