@@ -62,7 +62,7 @@ run = current_run or LocalRun()
     multiple=True,
     name="Data elements",
     help="Data elements to extract",
-    required=True,
+    required=False,
     widget=DHIS2Widget.DATA_ELEMENTS,
     connection="src_dhis2",
 )
