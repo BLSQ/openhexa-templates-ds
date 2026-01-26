@@ -5,7 +5,7 @@
 This pipeline extracts organisation units data from IASO, processes geometries, and exports to file, database, or OpenHEXA dataset.
 
 Key features:
-- Fetches organizational units (optionally filtered by type)
+- Fetches organisation units (optionally filtered by type)
 - Handles geometry conversion for spatial data
 - Exports to multiple file formats (CSV, GeoPackage, GeoJSON, Parquet, Shapefile, TopoJSON, Excel)
 - Supports PostGIS database export
@@ -19,7 +19,7 @@ Key features:
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `iaso_connection` | IASOConnection | Yes | - | Authentication details for IASO (url, username, password) |
-| `ou_type_id` | int | No | - | Specific organization unit type ID to filter results |
+| `ou_type_id` | int | No | - | Specific organisation unit type ID to filter results |
 | `output_file_name` | str | No | - | Custom output path/filename (without extension) |
 | `output_format` | str | No | `.gpkg` | Export file format (`.csv`, `.gpkg`, `.geojson`, `.parquet`, `.shp`, `.topojson`, `.xlsx`) |
 | `db_table_name` | str | No | - | Target database table name |
