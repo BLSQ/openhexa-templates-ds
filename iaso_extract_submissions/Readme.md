@@ -2,14 +2,14 @@
 
 ## Description
 
-This pipeline extracts and processes form submissions data from the IASO platform. Key features:
+This pipeline extracts and processes form submissions data from a IASO instance. Key features:
 - Authenticates with IASO using provided credentials
 - Fetches form submissions (optionally filtered by last updated date)
 - Converts choice codes to human-readable labels (optional)
 - Processes and cleans the data (deduplicates columns, handles list-type responses)
 - Exports to multiple formats (CSV, Parquet, Excel)
 - Supports database export with schema validation
-- Integrates with OpenHexa Datasets for versioned data storage
+- Integrates with OpenHEXA Datasets for versioned data storage
 
 ## Usage Example
 ![run image](docs/images/example_run.png)
@@ -26,7 +26,7 @@ This pipeline extracts and processes form submissions data from the IASO platfor
 | `output_format` | str | No | `.parquet` | Export file format (`.csv`, `.parquet`, `.xlsx`) |
 | `db_table_name` | str | No | - | Target database table name for storage |
 | `save_mode` | str | No | `replace` | Database write mode (`append` or `replace`) |
-| `dataset` | Dataset | No | - | Target OpenHexa Dataset for export |
+| `dataset` | Dataset | No | - | Target OpenHEXA Dataset for export |
 
 ## Pipeline Flow
 ```mermaid
