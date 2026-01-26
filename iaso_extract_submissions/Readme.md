@@ -1,6 +1,6 @@
 # IASO Form Submissions Extraction Pipeline
 
-## 📌 Description
+## Description
 
 This pipeline extracts and processes form submissions data from the IASO platform. Key features:
 - Authenticates with IASO using provided credentials
@@ -11,10 +11,10 @@ This pipeline extracts and processes form submissions data from the IASO platfor
 - Supports database export with schema validation
 - Integrates with OpenHexa Datasets for versioned data storage
 
-## 💻 Usage Example
+## Usage Example
 ![run image](docs/images/example_run.png)
 
-## ⚙️ Parameters
+## Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -28,7 +28,7 @@ This pipeline extracts and processes form submissions data from the IASO platfor
 | `save_mode` | str | No | `replace` | Database write mode (`append` or `replace`) |
 | `dataset` | Dataset | No | - | Target OpenHexa Dataset for export |
 
-## 🔄 Pipeline Flow
+## Pipeline Flow
 ```mermaid
 graph TD
     A([Start Pipeline]) --> B[Authenticate with IASO]
