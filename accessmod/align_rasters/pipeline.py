@@ -32,15 +32,30 @@ RESAMPLING_RULES = {
     multiple=False
 )
 @parameter(
+    "raster_ref",
+    name="Reference raster",
+    help="Reference raster onto which the other rasters will be reprojected",
+    type=str,
+    default="lowest_res",
+    required=False,
+    multiple=False
+)
+@parameter(
     "boundaries_file",
     name="Boundaries input file path",
     help="Input file of geometry of interest",
     type=str,
     required=True,
     multiple=False
-)
-def align_rasters(input_dir: str, boundaries_file: str, output_proj: str):
-    """Align, reproject, and crop all raster files in a directory using a reference raster (lowest resolution) and a geometry of interest.
+) 
+def align_rasters(input_dir: str, boundaries_file: str, raster_ref: str, output_proj: str):
+    """Align, reproject, and clip raster files from a directory to a common spatial reference.
+
+    All raster files found in ``input_dir`` are reprojected to the target coordinate
+    reference system ``output_proj``, resampled to match the grid of a reference raster,
+    and clipped to the area of interest defined in ``boundaries_file``. The reference
+    raster can be explicitly specified or inferred (e.g. lowest resolution) by the
+    underlying alignment routine.
 
     Parameters
     ----------
@@ -49,11 +64,13 @@ def align_rasters(input_dir: str, boundaries_file: str, output_proj: str):
     boundaries_file : str
         Path to the geometry file used to clip rasters.
         NB: that could be the only .gpkg (.parquet, etc.) in the folder input_dir
+    raster_ref : str
+        Name of the reference raster onto which others will be reprojected
     output_proj : str 
         Target projection for output rasters in EPSG format (e.g., "EPSG:4326").
     """
     # Create output directory
-    dst_dir = Path(workspace.files_path) / "pipelines" / "accessmod" / "aligned_data"
+    dst_dir = Path(workspace.files_path) / "aligned_data"
     dst_dir /= datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     dst_dir.mkdir(parents=True, exist_ok=True)
 
@@ -62,10 +79,11 @@ def align_rasters(input_dir: str, boundaries_file: str, output_proj: str):
     if not geom_path.exists():
         raise FileNotFoundError(f"Boundaries file does not exist: {geom_path}")
 
-    # Align rasters
+    # Align rasters (onto the user-defined one, or on the lowest resolution)
     aligned_files = align_crop_rasters(input_rasters_dir=Path(input_dir),
-                                           geom_path=boundaries_file,
-                                           output_projection=output_proj, 
+                                           geom_path=geom_path,
+                                           output_projection=output_proj,
+                                           reference_raster=raster_ref, 
                                            output_dir=dst_dir)
     
     current_run.log_info(f"Alignment completed. {len(aligned_files)} rasters saved to {dst_dir}")
@@ -136,7 +154,24 @@ def get_lowest_resolution_raster(rasters: list[str]) -> Path:
 
 
 def resampling_from_filename(filename: Path, rules: dict, default: str = "near") -> str:
-    """Determine the resampling algorithm based on raster filename and predefined rules."""
+    """Determine the resampling algorithm to use based on the raster filename.
+
+    Parameters
+    ----------
+    filename : Path
+        Path to the raster file whose name is used to determine the resampling method.
+    rules : dict
+        Dictionary mapping filename keywords to resampling algorithms.
+        Keys are searched as substrings in the filename.
+    default : str, optional
+        Resampling algorithm to use when no rule matches the filename.
+        Defaults to "near".
+
+    Returns
+    -------
+    str
+        The resampling algorithm to apply.
+    """
     name = filename.name.lower()
     for key, algo in rules.items():
         if key in name:
@@ -145,8 +180,9 @@ def resampling_from_filename(filename: Path, rules: dict, default: str = "near")
 
 
 def align_crop_rasters(input_rasters_dir: Path, 
-                       geom_path: str, 
-                       output_projection: str, 
+                       geom_path: Path, 
+                       output_projection: str,
+                       reference_raster: str,
                        output_dir: Path) -> list[str]:
     """Aligns, reprojects, resamples, and crops all `.tif` rasters in a directory to a common grid.
 
@@ -154,10 +190,12 @@ def align_crop_rasters(input_rasters_dir: Path,
     ----------
     input_rasters_dir : Path
         Path to the directory containing `.tif` raster files.
-    geom_path : str
+    geom_path : Path
         Path to the vector file (e.g., shapefile or GeoPackage) defining the area of interest.
     output_projection : str
         EPSG code or projection string for the output rasters.
+    reference_raster : str
+        Name of the reference raster used to reproject
     output_dir : Path
         Directory where processed rasters and reprojected geometry will be saved.
 
@@ -182,11 +220,14 @@ def align_crop_rasters(input_rasters_dir: Path,
         current_run.log_error(f"Failed to reproject area of interest {geom_path}: {e}")
         raise RuntimeError(f"Reprojection failed: {e}") from e
 
-    # Reference raster (lowest resolution)
-    ref_raster = get_lowest_resolution_raster(rasters)
-    current_run.log_info(f"Reference raster (lowest resolution): {ref_raster}")
+    # Reference raster 
+    if reference_raster is None:
+        ref_raster = get_lowest_resolution_raster(rasters)
+        current_run.log_info(f"Reference raster (lowest resolution): {ref_raster}")
+    else: 
+        ref_raster = input_rasters_dir / reference_raster.with_suffix(".tif")
 
-    ref_ds = gdal.Open(ref_raster)
+    ref_ds = gdal.Open(str(ref_raster))
 
     # User defined ouput projection
     ref_proj_ds = gdal.Warp(
