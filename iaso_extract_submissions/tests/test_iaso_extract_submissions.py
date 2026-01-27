@@ -6,11 +6,9 @@ import pytest
 from pipeline import (
     authenticate_iaso,
     clean_string,
-    deduplicate_columns,
     fetch_submissions,
     get_form_name,
     parse_cutoff_date,
-    process_choices,
 )
 
 
