@@ -1,0 +1,4 @@
+openhexa.toolbox @ git+https://github.com/BLSQ/openhexa-toolbox@main
+shapely==2.0.6
+rapidfuzz==3.9.4
+sentence-transformers==5.1.1
