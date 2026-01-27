@@ -2,7 +2,7 @@
 
 ## Description
 
-This pipeline extracts data values for specified data elements from a DHIS2 instance, processes the data, and saves it as a Parquet file.
+This pipeline extracts data values from a DHIS2 instance for specified data elements or data element groups; organisation units or organisation unit groups and periods. It processes the data, adding the relevant metadata. It saves it as a Parquet file and optionally into a dataset and a database
 
 ## Example usage
 
@@ -13,7 +13,7 @@ This pipeline extracts data values for specified data elements from a DHIS2 inst
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | Source DHIS2 | DHIS2 Connection | Yes | - | Source DHIS2 instance to extract data from |
-| Data elements | List of String | Yes* | - | Data elements to extract |
+| Data elements | List of String | No | - | Data elements to extract |
 | Data element groups | List of String | No | - | Data element groups to extract |
 | Organisation units | List of String | No | - | IDs of organisation units to extract data from |
 | Organisation unit groups | List of String | No | - | IDs of organisation unit groups to extract data from |
@@ -23,8 +23,6 @@ This pipeline extracts data values for specified data elements from a DHIS2 inst
 | Output file | String | No | Auto-generated | Custom output file path in workspace |
 | Output dataset | Dataset | No | - | OpenHEXA dataset. A new version will be created if new content is detected |
 | Output DB table | String | No | - | Database table name for storing the extracted data |
-
-*Data elements is required unless Data element groups is provided
 
 ⚠️
 
@@ -39,13 +37,14 @@ A valid DHIS2 data extraction request is composed of *one unit of information fo
 The pipeline supports three output options that can be used individually or in combination:
 
 ### 1. File Output (Parquet)
-By default, the pipeline generates a Parquet file containing the extracted data values with enriched metadata. The file is saved to:
+The pipeline generates a Parquet file containing the extracted analytics data with enriched metadata. 
 
+- If the parameter `Output file` is not provided, the file is saved to:
 ```
 <workspace>/pipelines/dhis2_extract_data_elements/<timestamp>/data_values.parquet
 ```
 
-You can specify a custom output path using the `Output file` parameter.
+- If the parameter `Output file` is provided, the file is saved to the specified path. 
 
 ### 2. OpenHEXA Dataset
 When an `Output dataset` is specified, the pipeline will:
@@ -84,6 +83,15 @@ The output includes:
 └─────────────────┴───────────────────┴──────────────────────┴──────────────────────────┴────────────────────────────┴───────────────────────────┴────────┴───────┴─────────────┴─────────────┴─────────────┴─────────────┴──────────────┴──────────────┴──────────────┴──────────────┴─────────────────────────┴─────────────────────────┘
 ```
 
+## Validation
+
+The output data is validated; checking that:
+- The DataFrame is not empty
+- All required columns are present
+- Columns have the expected data types
+- Certain columns have no null values
+If the validation fails, the pipeline raises an error and stops execution.
+
 ## Pipeline Flow
 
 ```mermaid
@@ -99,13 +107,20 @@ The output includes:
 flowchart TD
     A[Connect to DHIS2]
     A --> C[Fetch metadata]
-    C --> D[Validate data request]
+    C --> C1[Data Elements]
+    C --> C2[Indicators]
+    C --> C3[Organisation Units]
+    C --> C4[Category Option Combos]
+    C1 --> D[Validate data request]
+    C2 --> D
+    C3 --> D
+    C4 --> D
     D --> E{Data type?}
-    E -->|Data elements| F[Extract data elements]
-    E -->|Data element groups| G[Extract data element groups]
+    E -- Data elements --> F[Extract data elements]
+    E -- Data element groups --> G[Extract data element groups]
     F --> H[Join metadata names]
     G --> H
     H --> J[Write to Parquet file]
-    H --> K[Create dataset version]
-    H --> L[Write to database table]
+    H -- if Output dataset --> K[Create dataset version]
+    H -- if Output DB table --> L[Write to database table]
 ```

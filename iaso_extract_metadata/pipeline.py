@@ -1,6 +1,7 @@
 """Template for newly generated pipelines."""
 
 import hashlib
+import logging
 import re
 import unicodedata
 from datetime import datetime
@@ -19,9 +20,40 @@ from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.sdk.pipelines.parameter import IASOWidget
 from openhexa.toolbox.iaso import IASO, dataframe
 
+logger = logging.getLogger(__name__)
+
+
+class LocalRun:
+    """Mock current_run for local executions."""
+
+    def log_info(self, msg: str) -> None:
+        """Mock current_run.log_info()."""
+        logger.info(msg)
+
+    def log_warning(self, msg: str) -> None:
+        """Mock current_run.log_warning()."""
+        logger.warning(msg)
+
+    def log_error(self, msg: str) -> None:
+        """Mock current_run.log_error()."""
+        logger.error(msg)
+
+    def add_file_output(self, fp: str) -> None:
+        """Mock current_run.add_file_output()."""
+        logger.info(f"File output added: {fp}")
+
+
+run = current_run or LocalRun()
+
 
 @pipeline("iaso_extract_metadata")
-@parameter("iaso_connection", name="IASO connection", type=IASOConnection, required=True)
+@parameter(
+    "iaso_connection",
+    name="IASO connection",
+    type=IASOConnection,
+    required=True,
+    # default="iaso_prod",
+)
 @parameter(
     "form_id",
     name="Form ID",
@@ -29,6 +61,7 @@ from openhexa.toolbox.iaso import IASO, dataframe
     widget=IASOWidget.IASO_FORMS,
     connection="iaso_connection",
     required=True,
+    # default=1070,
 )
 @parameter(
     code="output_file_name",
@@ -92,15 +125,13 @@ def iaso_extract_metadata(
     iaso = authenticate_iaso(iaso_connection)
     form_name = get_form_name(iaso, form_id)
 
-    questions, choices = fetch_form_metadata(iaso, form_id)
+    form_metadata = dataframe.get_form_metadata(iaso, form_id)
+    questions, choices = format_form_metadata(form_metadata)
 
-    output_file_path = export_to_file(
-        questions,
-        choices,
-        form_name,
-        output_file_name,
-        output_format,
+    output_file_path = generate_output_file_path(
+        form_name=form_name, output_file_name=output_file_name, output_format=output_format
     )
+    output_file_path = export_to_file(questions, choices, output_format, output_file_path)
 
     if db_table_name:
         export_to_database(questions, choices, db_table_name, save_mode)
@@ -108,7 +139,7 @@ def iaso_extract_metadata(
     if dataset:
         export_to_dataset(file_path=output_file_path, dataset=dataset)
 
-    current_run.log_info("Pipeline execution successful ✅")
+    run.log_info("Pipeline execution successful ✅")
 
 
 def authenticate_iaso(conn: IASOConnection) -> IASO:
@@ -122,10 +153,10 @@ def authenticate_iaso(conn: IASOConnection) -> IASO:
     """
     try:
         iaso = IASO(conn.url, conn.username, conn.password)
-        current_run.log_info("IASO authentication successful")
+        run.log_info("IASO authentication successful")
         return iaso
     except Exception as e:
-        current_run.log_error(f"Authentication failed: {e}")
+        run.log_error(f"Authentication failed: {e}")
         raise
 
 
@@ -146,22 +177,20 @@ def get_form_name(iaso: IASO, form_id: int) -> str:
         response = iaso.api_client.get(f"/api/forms/{form_id}", params={"fields": {"name"}})
         return clean_string(response.json().get("name"))
     except Exception as e:
-        current_run.log_error(f"Form fetch failed: {e}")
+        run.log_error(f"Form fetch failed: {e}")
         raise ValueError("Invalid form ID") from e
 
 
-def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
-    """Fetches metadata for a form.
+def format_form_metadata(form_metadata: dict) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Format form metadata into questions and choices dataframes.
 
     Args:
-        iaso (IASO): An authenticated IASO object.
-        form_id (int): The ID of the form to fetch metadata
+        form_metadata (dict): Metadata dictionary for the form.
 
     Returns:
-        pl.DataFrame: Metadata for the form.
+        tuple[pl.DataFrame, pl.DataFrame]: A tuple containing
+            (questions DataFrame, choices DataFrame).
     """
-    form_metadata = dataframe.get_form_metadata(iaso, form_id)
-
     valid_versions = {k: v for k, v in form_metadata.items() if isinstance(k, int)}
     if valid_versions:
         latest_dt = max(valid_versions)
@@ -190,6 +219,7 @@ def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
             for choice in choices_list
         ],
         schema=["name", "choice_value", "choice_label"],
+        orient="row",
     )
 
     return questions, choices
@@ -198,27 +228,21 @@ def fetch_form_metadata(iaso: IASO, form_id: int) -> pl.DataFrame:
 def export_to_file(
     questions: pl.DataFrame,
     choices: pl.DataFrame,
-    form_name: str,
-    output_file_name: str,
     output_format: str,
+    output_file_path: Path,
 ) -> Path:
     """Export metadata to a file in the specified format.
 
     Args:
         questions (pl.DataFrame): Metadata questions to export.
         choices (pl.DataFrame): Metadata choices to export.
-        form_name (str): Name of the form.
-        output_file_name (str): Base name of the output file.
         output_format (str): File format to use for exporting the data.
+        output_file_path (Path): Path to the output file.
 
     Returns:
        Path: Path to the exported file.
     """
-    output_file_path = _generate_output_file_path(
-        form_name=form_name, output_file_name=output_file_name, output_format=output_format
-    )
-
-    current_run.log_info(f"Exporting form metadata to file `{output_file_path}`")
+    run.log_info(f"Exporting form metadata to file `{output_file_path}`")
     if output_format == ".xlsx":
         with xlsxwriter.Workbook(output_file_path) as workbook:
             questions.select(sorted(questions.columns)).sort(questions.columns).write_excel(
@@ -234,8 +258,8 @@ def export_to_file(
     elif output_format == ".csv":
         questions.join(choices, on="name", how="left").sort("label").write_csv(output_file_path)
 
-    current_run.add_file_output(output_file_path.as_posix())
-    current_run.log_info(f"Metadata saved to file `{output_file_path}`")
+    run.add_file_output(output_file_path.as_posix())
+    run.log_info(f"Metadata saved to file `{output_file_path}`")
     return output_file_path
 
 
@@ -248,7 +272,7 @@ def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_nam
         table_name (str): Name of the database table.
         mode (str): Save mode for the table.
     """
-    current_run.log_info("Exporting form metadata to database")
+    run.log_info("Exporting form metadata to database")
     try:
         metadata = questions.join(choices, on="name", how="left").sort("label")
         mode = mode or "replace"
@@ -258,10 +282,10 @@ def export_to_database(questions: pl.DataFrame, choices: pl.DataFrame, table_nam
             connection=workspace.database_url,
             if_table_exists=mode,
         )
-        current_run.add_database_output(table_name)
-        current_run.log_info(f"Metadata saved to database table {table_name}")
+        run.add_database_output(table_name)
+        run.log_info(f"Metadata saved to database table {table_name}")
     except Exception as e:
-        current_run.log_error(f"Database export failed: {e}")
+        run.log_error(f"Database export failed: {e}")
         raise
 
 
@@ -274,7 +298,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
     """
     latest_version = dataset.latest_version
     if bool(latest_version) and in_dataset_version(file_path, latest_version):
-        current_run.log_info(
+        run.log_info(
             f"Form metadata file `{file_path.name}` already exists in dataset version "
             f"`{latest_version.name}` and no changes have been detected"
         )
@@ -283,7 +307,7 @@ def export_to_dataset(file_path: Path, dataset: Dataset | None) -> None:
     version_number = int(latest_version.name.lstrip("v")) + 1 if latest_version else 1
     version = dataset.create_version(f"v{version_number}")
     version.add_file(file_path, file_path.name)
-    current_run.log_info(
+    run.log_info(
         f"Form metadata file `{file_path.name}` successfully added to {dataset.name} "
         f"dataset in version `{version.name}`"
     )
@@ -304,7 +328,7 @@ def clean_string(data: str) -> str:
     return re.sub(r"[^\w\s-]", "", data).strip().replace(" ", "_").lower()
 
 
-def _generate_output_file_path(form_name: str, output_file_name: str, output_format: str) -> Path:
+def generate_output_file_path(form_name: str, output_file_name: str, output_format: str) -> Path:
     """Generate the output file path based on provided parameters.
 
     Args:
@@ -322,7 +346,7 @@ def _generate_output_file_path(form_name: str, output_file_name: str, output_for
             output_file_path = output_file_path.with_suffix(output_format)
 
         if output_file_path.suffix not in [".csv", ".parquet", ".xlsx"]:
-            current_run.log_error(
+            run.log_error(
                 f"Unsupported output format: {output_file_path.suffix}. "
                 "Supported formats are: .csv, .parquet, .xlsx"
             )
