@@ -2,6 +2,11 @@
 
 This OpenHEXA pipeline extracts data values from a source DHIS2 instance for a given dataset and writes the values to a target DHIS2 instance, using mappings for `dataElement` and `categoryOptionCombo`, `attributeOptionCombo` and `orgUnits` (optional) IDs.
 
+## IMPORTANT NOTE
+This pipeline is not maintained by the DS team. We decided that it was too complex and not flexible enough. Our plan in the future is to divide this pipeline into two parts: one for extraction and another for loading, with a more generic transformation step in between that can be configured by the user. 
+
+If you need help setting up a pipeline like this, please contact the DS team.
+
 ## Features
 
 - ✅ Extract data values from source DHIS2 instance by dataset

@@ -1,226 +1,153 @@
-from typing import NotRequired, TypedDict
+from dataclasses import dataclass
 
 import polars as pl
-from openhexa.sdk import current_run
 from polars._typing import PolarsDataType
 
 
-class ExpectedColumn(TypedDict):
+@dataclass
+class ExpectedColumn:
     """Specification for a single expected DataFrame column.
 
-    Defines the schema requirements for a column in a Polars DataFrame.
-    Used by `validate_data` to enforce column presence, data type, nullability,
-    string length, and integer convertibility.
-
     Attributes:
-        name (str): 
-            The expected column name.
-        type (PolarsDataType): 
-            The expected Polars data type of the column.
-        not_null (bool): 
-            Whether the column must not contain null or empty-string values.
-        number_of_characters (int, optional): 
-            Maximum allowed number of characters for string values. If specified,
-            all values must match this exact character length.
-        can_be_converted_to_integer (bool, optional): 
-            Whether all values in the column must be safely convertible to integers.
+        name: Column name in the dataframe.
+        required: Whether the column is required to be present in the dataframe.
+        type: Expected Polars data type of the column.
+        n_chars: Expected number of characters for string columns.
+        not_null: Whether the column must not contain null values.
     """
 
     name: str
     type: PolarsDataType
-    not_null: bool
-    number_of_characters: NotRequired[int]
-    can_be_converted_to_integer: NotRequired[bool]
+    n_chars: int | None = None
+    required: bool = True
+    not_null: bool = False
 
 
-expected_columns: list[ExpectedColumn] = [
-    {
-        "name": "data_element_id",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "data_element_name",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "organisation_unit_id",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "category_option_combo_id",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "attribute_option_combo_id",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "category_option_combo_name",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "period",
-        "type": pl.String,
-        "number_of_characters": 6,
-        "can_be_converted_to_integer": True,
-        "not_null": False,
-    },
-    {
-        "name": "value",
-        "type": pl.String,
-        "can_be_converted_to_integer": True,
-        "not_null": False,
-    },
-    {
-        "name": "level_1_id",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "level_2_id",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "level_3_id",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "level_4_id",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "level_1_name",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "level_2_name",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "level_3_name",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "level_4_name",
-        "type": pl.String,
-        "not_null": False,
-    },
-    {
-        "name": "created",
-        "type": pl.Datetime,
-        "not_null": False,
-    },
-    {
-        "name": "last_updated",
-        "type": pl.Datetime,
-        "not_null": False,
-    },
-]
+@dataclass
+class ErrorMessage:
+    """Error message from dataframe validation."""
+
+    column_name: str
+    message: str
 
 
-def validate_data(df: pl.DataFrame) -> None:
-    """Validate a Polars DataFrame against a predefined schema.
+class DataValidationError(Exception):
+    """Exception raised for errors in the DataFrame validation.
 
-    This function performs a comprehensive validation of the DataFrame against
-    the `expected_columns` schema. It checks for structural and data-quality issues,
-    and raises a single `RuntimeError` summarizing all violations.
+    Attributes:
+        errors (list[ErrorMessage]):
+            List of error messages detailing the validation issues.
+    """
 
-    Validation rules include:
-        * DataFrame must not be empty.
-        * Only expected columns are allowed; unexpected columns are flagged.
-        * Each column must match the expected Polars data type.
-        * Columns marked `not_null` cannot contain null or empty-string values.
-        * Columns with a `number_of_characters` constraint must have exactly
-          the specified number of characters.
-        * Columns marked `can_be_converted_to_integer` must be safely castable
-          to integers.
+    def __init__(self, errors: list[ErrorMessage]) -> None:
+        self.errors = errors
+        super().__init__(self._format_errors())
+
+    def _format_errors(self) -> str:
+        return "\n".join(f"{error.column_name}: {error.message}" for error in self.errors)
+
+
+def validate_data_type(serie: pl.Series, expected_type: PolarsDataType) -> ErrorMessage | None:
+    """Validate the data type of a Polars Series.
 
     Args:
-        df (pl.DataFrame): The Polars DataFrame to validate.
+        serie: The Polars Series to validate.
+        expected_type: The expected Polars data type.
+
+    Returns:
+        An ErrorMessage if the data type does not match, otherwise None.
+    """
+    if serie.dtype != expected_type:
+        message = (
+            f"Type of column '{serie.name}' is '{serie.dtype}' "
+            f"and does not match expected type ({expected_type})."
+        )
+        return ErrorMessage(column_name=serie.name, message=message)
+    return None
+
+
+def validate_not_null(serie: pl.Series) -> ErrorMessage | None:
+    """Validate that a Polars Series does not contain null values.
+
+    Args:
+        serie: The Polars Series to validate.
+
+    Returns:
+        An ErrorMessage if null values are found, otherwise None.
+    """
+    null_count = serie.null_count()
+    if null_count > 0:
+        message = (
+            f"Column '{serie.name}' has {null_count} null values. It is not expected to have any."
+        )
+        return ErrorMessage(column_name=serie.name, message=message)
+    return None
+
+
+def validate_nchars(serie: pl.Series, expected_nchars: int) -> ErrorMessage | None:
+    """Validate the number of characters in a Polars Series.
+
+    Args:
+        serie: The Polars Series to validate.
+        expected_nchars: The expected number of characters.
+
+    Returns:
+        An ErrorMessage if any value does not match the expected number of characters,
+        other wise None.
+    """
+    if (serie.str.len_chars() != expected_nchars).any():
+        message = (
+            f"Column '{serie.name}' has values not matching "
+            f"the expected number of characters ({expected_nchars})."
+        )
+        return ErrorMessage(column_name=serie.name, message=message)
+    return None
+
+
+def validate_dataframe(df: pl.DataFrame, expected_columns: list[ExpectedColumn]) -> None:
+    """Validate a Polars DataFrame against expected columns.
+
+    Args:
+        df: The Polars DataFrame to validate.
+        expected_columns: List of ExpectedColumn defining the expected schema.
 
     Raises:
-        RuntimeError: If any of the validation rules are violated. Potential
-        issues include:
-            - Empty DataFrame
-            - Unexpected or extra columns
-            - Column data type mismatches
-            - Null or empty values in non-nullable columns
-            - String values exceeding or not matching the required character length
-            - Values that cannot be converted to integers when expected
+        DataValidationError: If any validation errors are found.
     """
-    error_messages = ["\n"]
-    if df.height == 0:
-        error_messages.append("data_values is empty")
+    errors: list[ErrorMessage] = []
 
-    # checking for unvalidated columns
-    expected_column_names = [col["name"] for col in expected_columns]
-    unvalidated_columns = [
-        col for col in df.columns if col not in expected_column_names
-    ]
-    if len(unvalidated_columns) > 0:
-        error_messages.append(
-            f"Data in column(s) {unvalidated_columns} is(are) not validated"
-        )
-    # Stop early if names mismatch — prevents key errors
-    if len(error_messages) > 1:
-        raise RuntimeError("\n".join(error_messages))
+    if df.is_empty():
+        message = "The dataframe is empty."
+        errors.append(ErrorMessage(column_name="DataFrame", message=message))
+        raise DataValidationError(errors)
 
-    for col in expected_columns:
-        col_name = col["name"]
-        col_type = col["type"]
-        # validating data types
-        if df.schema[col_name] != col_type:
-            error_messages.append(
-                f"Type of column {col_name} is {df.schema[col_name]} and "
-                f"does not match expected type: {col_type}"
-            )
-        # validating emptiness of a column
-        if col["not_null"]:
-            df_empty_or_null_cololumn = df.filter(
-                (pl.col(col_name).is_null()) | (pl.col(col_name) == "")  # noqa: PLC1901
-            )
-            if df_empty_or_null_cololumn.height > 0:
-                error_messages.append(
-                    f"Column {col_name} has missing values. "
-                    "It is not expected have any value missing"
-                )
+    for column in df.columns:
+        if column not in [col.name for col in expected_columns]:
+            message = f"Column '{column}' is not expected in the dataframe."
+            errors.append(ErrorMessage(column_name=column, message=message))
 
-        # validating number_of_characters
-        char_num = col.get("number_of_characters")
-        if char_num:
-            df_with_char_count = df.filter(
-                pl.col(col_name).str.len_chars().alias("char_count") != char_num
-            )
+    for column in expected_columns:
+        if column.name not in df.columns:
+            if column.required:
+                message = f"Expected column '{column.name}' is missing."
+                errors.append(ErrorMessage(column_name=column.name, message=message))
+            continue
 
-            if df_with_char_count.height > 0:
-                raise RuntimeError(
-                    f"Found values exceeding {char_num} characters:\n{col_name}"
-                )
+        serie = df[column.name]
 
-        # validating column values to be
-        # able to converted to integers
-        int_conversion = col.get("can_be_converted_to_integer")
-        if int_conversion:
-            try:
-                df.with_columns(pl.col(col_name).cast(pl.Int64))
-            except Exception as e:
-                raise RuntimeError(  # noqa: B904
-                    f"Column {col_name} cannot be converted to integer: {e}"
-                )
+        type_error = validate_data_type(serie, column.type)
+        if type_error:
+            errors.append(type_error)
 
-    if len(error_messages) > 1:
-        message = "\n".join(error_messages)
-        current_run.log_error(message)
-        raise RuntimeError(message)
+        if column.not_null:
+            not_null_error = validate_not_null(serie)
+            if not_null_error:
+                errors.append(not_null_error)
+
+        if column.n_chars is not None:
+            nchars_error = validate_nchars(serie, column.n_chars)
+            if nchars_error:
+                errors.append(nchars_error)
+
+    if len(errors) > 0:
+        raise DataValidationError(errors)
