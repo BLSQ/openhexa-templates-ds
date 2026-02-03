@@ -1,0 +1,15 @@
+FROM dhis2/core:40.8.0
+
+# Install required tools for database operations
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy initialization script
+COPY docker/init-dhis2.sh /usr/local/bin/init-dhis2.sh
+RUN chmod +x /usr/local/bin/init-dhis2.sh
+
+# Set custom entrypoint to handle Sierra Leone import
+ENTRYPOINT ["/usr/local/bin/init-dhis2.sh"]
+CMD ["catalina.sh", "run"]
