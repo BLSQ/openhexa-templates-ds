@@ -9,6 +9,8 @@ This pipeline synchronizes ERA5-Land climate data from the Copernicus Climate Da
 
 The pipeline is designed to be run incrementally - subsequent runs will only download data for missing dates.
 
+To load data outputs into a DHIS2 instance, use the [ERA5 Load DHIS2](../era5_load_dhis2/) pipeline.
+
 - [Example usage](#example-usage)
 - [Prerequisites](#prerequisites)
 - [Parameters](#parameters)
@@ -65,6 +67,8 @@ The pipeline supports the following ERA5-Land variables:
 **Derived Variables** (calculated automatically when component variables are present):
 - `relative_humidity` (rh) - Calculated from `2m_temperature` and `2m_dewpoint_temperature`
 - `wind_speed` (ws) - Calculated from `10m_u_component_of_wind` and `10m_v_component_of_wind`
+
+See [OpenHEXA Toolbox ERA5 documentation](https://github.com/BLSQ/openhexa-toolbox/tree/main/openhexa/toolbox/era5) for more details.
 
 ## Output
 
