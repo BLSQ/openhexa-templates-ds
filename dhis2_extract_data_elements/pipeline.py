@@ -21,7 +21,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     join_object_names,
 )
 
-from validate import DataValidationError, ExpectedColumn, validate_dataframe
+from .validate import DataValidationError, ExpectedColumn, validate_dataframe
 
 logger = logging.getLogger(__name__)
 
