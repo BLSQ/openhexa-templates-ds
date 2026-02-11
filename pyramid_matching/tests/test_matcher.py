@@ -21,9 +21,9 @@ def test_matcher_str_fuzzy(matcher: Matcher):
     assert "WRatio" in text
 
 
-def test_matcher_str_matcher_names(matcher: Matcher):
+def test_matcher_str_matcher_types(matcher: Matcher):
     """Test the string representation of the matcher."""
-    text = str(matcher.matcher_names())
+    text = str(matcher.matcher_types())
     assert "fuzzy" in text
     assert "transformer" in text
     assert "geometry" in text

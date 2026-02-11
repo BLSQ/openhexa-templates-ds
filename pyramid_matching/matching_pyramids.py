@@ -101,7 +101,7 @@ def match_pyramids(
     # Initialize matcher
     try:
         matcher = Matcher(
-            matcher_name=method, threshold=threshold, scorer_fuzzy=scorer_method_fuzzy
+            matcher_type=method, threshold=threshold, scorer_fuzzy=scorer_method_fuzzy
         )
         if logger:
             logger.log_info(f"Using matcher: {matcher!s}")

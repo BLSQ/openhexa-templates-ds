@@ -88,6 +88,9 @@ class SentenceTransformerMatcher(BaseMatcher):
         """Return similarity scores for the candidates using sentence transformers."""
         raise NotImplementedError("SentenceTransformerMatcher.get_similarity is not implemented.")
 
+    def __str__(self) -> str:
+        return f"TransformerMatcher(scorer: {self.model.__name__})"
+
 
 class GeometryMatcher(BaseMatcher):
     """Matcher that uses geometric similarity to compute similarity scores.
@@ -99,12 +102,16 @@ class GeometryMatcher(BaseMatcher):
         import shapely.geometry  # noqa: PLC0415
 
         self.shapely = shapely.geometry
+        self.distance = self.shapely.distance  # Distance for geometric similarity (closest point?)
 
     def get_similarity(
         self, query: str | BaseGeometry, candidates: list[str | BaseGeometry], threshold: float
     ) -> dict:
         """Return geometric similarity scores for the candidates."""
         raise NotImplementedError("GeometryMatcher.get_similarity is not implemented.")
+
+    def __str__(self) -> str:
+        return f"GeometryMatcher(distance: {self.scorer.__name__})"
 
 
 class Matcher:
@@ -122,23 +129,23 @@ class Matcher:
     -------
     match(query, candidates, threshold)
         Returns similarity scores using the selected matcher.
-    matcher_names()
+    matcher_type()
         Returns a list of available matcher names.
     """
 
     def __init__(
         self,
-        matcher_name: str,
-        threshold: float,
-        scorer_fuzzy: str,
+        matcher_type: str,
+        threshold: float = 80,
+        scorer_fuzzy: str = "wratio",
     ):
-        matcher_name = matcher_name.lower()
+        matcher_name = matcher_type.lower()
 
-        if matcher_name == "fuzzy":
+        if matcher_type == "fuzzy":
             self.matcher = FuzzyMatcher(threshold=threshold, scorer_name=scorer_fuzzy)
-        # elif matcher_name == "transformer":
+        # elif matcher_type == "transformer":
         #    self.matcher = SentenceTransformerMatcher()
-        # elif matcher_name == "geometry":
+        # elif matcher_type == "geometry":
         #    self.matcher = GeometryMatcher()
         else:
             raise ValueError(f"Unknown matcher: {matcher_name}")
@@ -160,7 +167,7 @@ class Matcher:
         """
         return self.matcher.get_similarity(query, candidates)
 
-    def matcher_names(self) -> list[str]:
+    def matcher_types(self) -> list[str]:
         """Return a list of available matcher names.
 
         Returns
@@ -168,7 +175,14 @@ class Matcher:
         list of str
             The names of available matcher strategies.
         """
-        return ["fuzzy"]
+        return ["fuzzy", "transformer", "geometry"]
+
+    def set_scorer_fuzzy(self, scorer_name: str):
+        """Set the scorer function for the fuzzy matcher."""
+        if isinstance(self.matcher, FuzzyMatcher):
+            self.matcher.set_scorer(scorer_name)
+        else:
+            raise ValueError("Current matcher is not a FuzzyMatcher, cannot set scorer.")
 
     def __str__(self) -> str:
         return str(self.matcher)
