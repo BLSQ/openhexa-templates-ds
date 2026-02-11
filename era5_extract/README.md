@@ -35,11 +35,11 @@ Directory in OpenHEXA workspace where raw data will be saved.
 
 * `2m_temperature`
 * `total_precipitation`
-* `volumetric_soil_water_layer_1`
+* `volumetric_soil_water_layer_1` (EM: variables supported updated?)
 
 New variables can be supported by appending its identifier
 to the `variables` list in `era5_extract()`. See documentation of `openhexa.toolbox.era5` for more
-info on available variables.
+info on available variables. (EM: perhaps here we should add a direct URL link)
 
 ## Data acquisition
 
