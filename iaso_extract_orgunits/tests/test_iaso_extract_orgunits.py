@@ -1,12 +1,16 @@
 """Unit tests for IASO extract organizational units pipeline."""
 
-
 import json
+import sys
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from pipeline import (
     authenticate_iaso,
     clean_string,
@@ -98,14 +102,35 @@ def test_get_organisation_units_with_type_id(
     mock_client: MagicMock = MagicMock()
     mock_client.api_client.get.return_value = mock_response
 
-    mock_geoms.return_value = {
-        "1": json.dumps({"type": "Point", "coordinates": [0, 0]})
-    }
+    mock_geoms.return_value = {1: json.dumps({"type": "Point", "coordinates": [0, 0]})}
 
     df: pl.DataFrame = get_organisation_units(mock_client, 1)
+    mock_client.api_client.get.assert_called_once_with(
+        url="api/orgunits",
+        params={"csv": True, "orgUnitTypeId": 1},
+        stream=True,
+    )
 
     assert isinstance(df, pl.DataFrame)
     assert "geometry" in df.columns
+    assert df.columns == [
+        "id",
+        "name",
+        "org_unit_type",
+        "latitude",
+        "longitude",
+        "opening_date",
+        "closing_date",
+        "created_at",
+        "updated_at",
+        "source",
+        "validation_status",
+        "source_ref",
+        "geometry",
+    ]
+    assert df["id"].to_list() == [1]
+    assert df["created_at"].to_list()[0] == datetime(2020, 1, 1, 10, 0)
+    assert df["geometry"].to_list() == ['{"type": "Point", "coordinates": [0, 0]}']
 
 
 @patch("pipeline.dataframe._get_org_units_geometries")
@@ -126,6 +151,11 @@ def test_get_organisation_units_without_type_id(
     mock_geoms.return_value = {}
 
     df: pl.DataFrame = get_organisation_units(mock_client)
+    mock_client.api_client.get.assert_called_once_with(
+        "/api/orgunits",
+        params={"csv": True},
+        stream=True,
+    )
 
     assert isinstance(df, pl.DataFrame)
 
@@ -141,9 +171,7 @@ def test_export_to_file(
     df: pl.DataFrame = pl.DataFrame(
         {
             "id": [1],
-            "geometry": [
-                json.dumps({"type": "Point", "coordinates": [0, 0]})
-            ],
+            "geometry": [json.dumps({"type": "Point", "coordinates": [0, 0]})],
         }
     )
 
@@ -180,7 +208,14 @@ def test_export_to_database(
     export_to_database(pl.DataFrame(), "table", "replace")
 
     geo_df.to_postgis.assert_called_once()
+    geo_df.to_postgis.assert_called_with(
+        "table",
+        mock_engine.return_value,
+        if_exists="replace",
+        index=False,
+    )
     mock_run.add_database_output.assert_called_once()
+    mock_run.add_database_output.assert_called_with("table")
 
 
 @patch("pipeline.in_dataset_version", return_value=False)
@@ -209,9 +244,7 @@ def test_export_to_dataset(
 
 def test_convert_to_geometry() -> None:
     """Test conversion of GeoJSON string to Shapely geometry."""
-    geojson: str = json.dumps(
-        {"type": "Point", "coordinates": [1, 2]}
-    )
+    geojson: str = json.dumps({"type": "Point", "coordinates": [1, 2]})
 
     geom = convert_to_geometry(geojson)
 
