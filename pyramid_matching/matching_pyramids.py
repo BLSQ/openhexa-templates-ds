@@ -1,6 +1,6 @@
 import config
 import polars as pl
-from matcher.matcher import Matcher
+from matcher.matchers import BaseMatcher, FuzzyMatcher
 from openhexa.sdk.pipelines.run import CurrentRun
 
 
@@ -10,7 +10,6 @@ def match_pyramids(
     logger: CurrentRun | None = None,
     levels_to_match: list | None = None,
     matching_col_suffix: str = "_name",
-    method: str = "fuzzy",
     threshold: int = 80,
     scorer_method_fuzzy: str = "WRatio",
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
@@ -58,10 +57,6 @@ def match_pyramids(
     matching_col_suffix: str, optional
         The suffix of the column that we will do the matching on.
         Default is "_name".
-    method : str, optional
-        The method to use for the matching. For now, the only available matcher is "fuzzy".
-        (but we will add more in the future).
-        Default is "fuzzy".
     threshold : int, optional
         The threshold for the matching score. Default is 80.
     scorer_method_fuzzy : str, optional
@@ -100,13 +95,11 @@ def match_pyramids(
 
     # Initialize matcher
     try:
-        matcher = Matcher(
-            matcher_type=method, threshold=threshold, scorer_fuzzy=scorer_method_fuzzy
-        )
+        matcher = FuzzyMatcher(threshold=threshold, scorer_name=scorer_method_fuzzy)
         if logger:
             logger.log_info(f"Using matcher: {matcher!s}")
     except ValueError as e:
-        raise ValueError(f"Unknown matching method: {method}") from e
+        raise ValueError(f"Unknown matching method: {matcher}") from e
 
     for level in levels_to_match:
         if logger:
@@ -369,7 +362,7 @@ def _match_level(
     pyramid: pl.DataFrame,
     target_level: str,
     levels_already_matched: list,
-    matcher: Matcher,
+    matcher: BaseMatcher,
     attributes_level: dict,
     matching_col_suffix: str,
 ) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
@@ -485,7 +478,7 @@ def _match_level_group(
     pyramid: pl.DataFrame,
     data: pl.DataFrame,
     level: str,
-    matcher: Matcher,
+    matcher: BaseMatcher,
     attributes_level: dict,
     schema_match: list,
     matching_col_suffix: str,
@@ -531,9 +524,12 @@ def _match_level_group(
     # The list will contain some lists with the matched names, attributes, and scores.
 
     for name_to_match, attributes_data in data_to_match.items():
-        matches = matcher.match(name_to_match, pyramid_to_match)
+        matches = matcher.get_similarity(name_to_match, pyramid_to_match)
         if matches:
-            list_matches.append(matches + attributes_data)
+            list_matches.append(
+                [matches.query, matches.matched, matches.attributes, matches.score]
+                + attributes_data
+            )
 
     if len(list_matches) > 0:
         df_matches = pl.DataFrame(

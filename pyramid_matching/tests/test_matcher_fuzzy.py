@@ -1,5 +1,5 @@
 import pytest
-from matcher.matcher import FuzzyMatcher
+from matcher.matchers import FuzzyMatcher
 
 
 @pytest.fixture
@@ -39,11 +39,13 @@ def test_fuzzy_get_similarity_match(fuzzy_matcher: FuzzyMatcher):
         "EQUATEUR": ["XjeRGfqHMrl"],
         "MANIEMA": ["uyuwe6bqphf"],
     }
-    result = fuzzy_matcher.get_similarity("TSHUAPA", candidates, threshold=80)
-    assert result[0] == "TSHUAPA", "Expected query to be 'TSHUAPA'"
-    assert result[1] == "TSHUAPA", "Expected query to be 'TSHUAPA'"
-    assert result[2] == "ym2K6YcSNl9", "Expected  list of attributes, result[2] == 'ym2K6YcSNl9'"
-    assert result[3] == 100, "Expected score to be 100"
+    result = fuzzy_matcher.get_similarity("TSHUAPA", candidates)
+    assert result.query == "TSHUAPA", "Expected query to be 'TSHUAPA'"
+    assert result.matched == "TSHUAPA", "Expected query to be 'TSHUAPA'"
+    assert result.score == 100, "Expected score to be 100"
+    assert result.attributes == ["ym2K6YcSNl9"], (
+        "Expected  list of attributes, result[2] == 'ym2K6YcSNl9'"
+    )
 
 
 def test_matcher_match_with_fuzzy_threshold(fuzzy_matcher: FuzzyMatcher):
@@ -56,11 +58,15 @@ def test_matcher_match_with_fuzzy_threshold(fuzzy_matcher: FuzzyMatcher):
         "EQUATEUR": ["XjeRGfqHMrl"],
         "MANIEMA": ["uyuwe6bqphf"],
     }
-    result = fuzzy_matcher.get_similarity("TSHUAPAS", candidates, threshold=90)
-    assert result[1] == "TSHUAPA"
-    assert result[2] == "ym2K6YcSNl9", "Expected  list of attributes, result[3] == 'ym2K6YcSNl9'"
-    assert result[3] > 93.3, "Expected score > 93.33"
-    result = fuzzy_matcher.get_similarity("TSHUAPAS", candidates, threshold=95)
+    fuzzy_matcher.set_threshold(90)
+    result = fuzzy_matcher.get_similarity("TSHUAPAS", candidates)
+    assert result.matched == "TSHUAPA"
+    assert result.attributes == ["ym2K6YcSNl9"], (
+        "Expected  list of attributes, result[3] == 'ym2K6YcSNl9'"
+    )
+    assert result.score > 93.3, "Expected score > 93.33"
+    fuzzy_matcher.set_threshold(95)
+    result = fuzzy_matcher.get_similarity("TSHUAPAS", candidates)
     assert result is None, "Expected no match above threshold 95"
 
 
@@ -74,5 +80,6 @@ def test_fuzzy_get_similarity_no_match(fuzzy_matcher: FuzzyMatcher):
         "EQUATEUR": ["XjeRGfqHMrl"],
         "MANIEMA": ["uyuwe6bqphf"],
     }
-    result = fuzzy_matcher.get_similarity("NOWEHERE", candidates, threshold=80)
+    fuzzy_matcher.set_threshold(80)
+    result = fuzzy_matcher.get_similarity("NOWEHERE", candidates)
     assert result is None, "Expected query to be None"
