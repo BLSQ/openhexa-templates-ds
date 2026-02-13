@@ -6,8 +6,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ..pipeline import RequestParams, validate, validate_parameters
-from ..validate import DataValidationError
+from pipeline import RequestParams, validate, validate_parameters
+from validate import DataValidationError
 
 
 def test_validate_parameters() -> None:
