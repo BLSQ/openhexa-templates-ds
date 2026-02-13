@@ -1,0 +1,23 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+    -   id: trailing-whitespace
+        files: ^iaso_import_submissions/
+    -   id: end-of-file-fixer
+        files: ^iaso_import_submissions/
+    -   id: check-yaml
+        files: ^iaso_import_submissions/
+    -   id: check-added-large-files
+        files: ^iaso_import_submissions/
+
+-   repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.1
+    hooks:
+      - id: ruff-check
+        files: ^iaso_import_submissions/
+        args: [ --fix ]
+      - id: ruff-format
+        files: ^iaso_import_submissions/
