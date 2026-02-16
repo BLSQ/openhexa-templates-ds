@@ -179,28 +179,36 @@ def validate_user_roles(iaso: IASO, app_id: str) -> bool:
         return {str(obj)}
 
     perms = _to_perm_set(res.get("permissions")) | _to_perm_set(res.get("user_permissions"))
-    has_form_permissions = "iaso_update_submission" in perms
+    has_form_permissions = "iaso_update_submission" in perms or "iaso_submissions" in perms
 
-    user_account = res.get("account")
-    has_account = False
-    if isinstance(user_account, dict):
-        has_account = user_account.get("name") == app_id
-    elif isinstance(user_account, (list, tuple)):
+    user_account_projects = res.get("projects", [])
+    has_project_access = False
+    if isinstance(user_account_projects, dict):
+        has_project_access = user_account_projects.get("app_id") == app_id
+    elif isinstance(user_account_projects, (list, tuple)):
         try:
-            has_account = any(
-                (acc or {}).get("name") == app_id for acc in user_account if isinstance(acc, dict)
+            has_project_access = any(
+                (acc or {}).get("app_id") == app_id
+                for acc in user_account_projects
+                if isinstance(acc, dict)
             )
         except Exception:
-            has_account = False
+            has_project_access = False
     else:
-        has_account = False
+        has_project_access = False
 
-    result = bool(has_form_permissions and has_account)
+    if not has_project_access:
+        current_run.log_warning(
+            "User is not assigned to the target project app_id; continuing because this check "
+            "is non-blocking "
+            f"(app_id={app_id}, projects={user_account_projects})"
+        )
+
+    result = bool(has_form_permissions)
     if not result:
         current_run.log_info(
-            "User lacks required role or account mismatch "
-            f"(app_id={app_id}): permissions={list(perms)}, "
-            f"account={user_account}"
+            "User lacks required submission permission "
+            f"(required=iaso_update_submission or iaso_submissions, permissions={list(perms)})"
         )
     return result
 
