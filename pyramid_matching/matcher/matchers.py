@@ -18,7 +18,7 @@ class MatchResult:
 
     query: str
     matched: str
-    attributes: dict[str, Any]
+    attributes: CandidateAttributes
     score: float
 
 

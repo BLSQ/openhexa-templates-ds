@@ -11,12 +11,12 @@ os.chdir(Path(__file__).parent)
 def main():
     """Example of calling the match_pyramids function."""
     dhis2_pyramid = pl.read_csv("data/dhis2_pyramid.csv")
-    data = pl.read_csv("data/data_to_match_2_error.csv")
+    data = pl.read_csv("data/data_to_match.csv")
 
     matcher = FuzzyMatcher(threshold=80)
     pyramid_matcher = PyramidMatcher(matcher=matcher)
 
-    matched_data, matched_data_simplified, reference_not_matcher, candidate_not_matched = (
+    matched_data, matched_data_simplified, reference_not_matched, candidate_not_matched = (
         pyramid_matcher.run_matching(
             reference_pyramid=dhis2_pyramid,
             candidate_pyramid=data,
@@ -26,7 +26,7 @@ def main():
 
     print(matched_data.head())
     print(matched_data_simplified.head())
-    print(reference_not_matcher.head())
+    print(reference_not_matched.head())
     print(candidate_not_matched.head())
 
 
