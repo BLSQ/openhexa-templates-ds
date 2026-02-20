@@ -11,12 +11,10 @@ This repository contains reusable pipeline templates for common data workflows. 
 | **dhis2_extract_analytics**       | Extracts analytics data (for data elements, data element groups, indicators, indicator groups), enriching them with metadata. |                                                                                                            |
 | **dhis2_extract_dataset**         | Extracts data from a DHIS2 dataset, enriches with metadata, outputs Parquet/CSV/DB/Dataset.      |                                                                                                            |
 | **dhis2_extract_data_elements**   | Extracts data values for specified data elements or data element groups.                          |                                                                                                            |
-| **dhis2_extract_data_elements**   | Extracts data values for a specified dataset.                                                     |                                                                                                            |
 | **dhis2_extract_events**          | Extracts event values for a DHIS2 program.                                                       |                                                                                                            |
 | **dhis2_metadata_extract**        | Extracts information about DHIS2 metadata. It can extract data for: organisation units, organisation unit groups, datasets, data elements, data element groups, and category option combos. |                                                                                                            |
 | **dhis2_shapes_extract**          | Extracts org unit geometries from DHIS2.                                                         | The organisation unit level to extract geometries from can be specified.                                   |
                           
-
 ---
 
 ## ERA5 Pipelines
