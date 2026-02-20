@@ -22,7 +22,9 @@ See also [ERA5 Sync](../era5_sync/) pipeline documentation for more details on s
 - **DHIS2 Instance**: Target DHIS2 instance with appropriate data elements and organisation units configured
 - **Mapping Files**: JSON files mapping ERA5 variables to DHIS2 data elements (and optionally boundaries to org units)
 
-## Parameters
+## Parameters 
+
+(EM: Maybe here we can add a screenshot of the parameters?)
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
