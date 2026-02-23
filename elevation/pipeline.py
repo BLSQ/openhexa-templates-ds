@@ -1,3 +1,4 @@
+import math
 import subprocess
 import tempfile
 from datetime import datetime
@@ -5,13 +6,24 @@ from pathlib import Path
 
 import boto3
 import geopandas as gpd
+import numpy as np
 from botocore import UNSIGNED
 from botocore.config import Config
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from osgeo import gdal
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, box
 
 gdal.UseExceptions()
+
+RASTERIO_DEFAULT_PROFILE = {
+    "driver": "GTiff",
+    "tiled": True,
+    "blockxsize": 256,
+    "blockysize": 256,
+    "compress": "zstd",
+    "predictor": 2,
+    "num_threads": "all_cpus",
+}
 
 
 @pipeline("elevation")
@@ -22,7 +34,7 @@ gdal.UseExceptions()
     type=str,
     required=True,
     default="workspace/DRC.gpkg",
-    multiple=False
+    multiple=False,
 )
 @parameter(
     "output_dir",
@@ -31,15 +43,15 @@ gdal.UseExceptions()
     type=str,
     required=False,
     default="elevation",
-    multiple=False
+    multiple=False,
 )
 def generate_elevation_raster(boundaries_file: str, output_dir: str):
     """Generate an elevation raster and slope from Copernicus DEM data.
 
     This function extracts Copernicus DEM tiles intersecting the input boundary,
     merges them into a single mosaic, crops it according to the buffered geometry,
-    and computes the slope. The resulting elevation and slope rasters are saved
-    as .tif files in the specified output directory. 
+    and computes the slope. The resulting elevation and slope rasters (with buffer!) are saved
+    as .tif files in the specified output directory.
 
     Parameters
     ----------
@@ -61,7 +73,7 @@ def generate_elevation_raster(boundaries_file: str, output_dir: str):
     # Load boundary
     boundaries = read_boundaries(file_path=Path(boundaries_file))
 
-    # Add buffer and save for later 
+    # Add buffer and save for later
     target_geom = get_buffered_geom(boundaries=boundaries, buffer=0.2, output_dir=output_dir)
 
     # Find tiles
@@ -71,49 +83,47 @@ def generate_elevation_raster(boundaries_file: str, output_dir: str):
         raise RuntimeError("💥 No Copernicus tile intersects the input geometry.")
 
     with tempfile.TemporaryDirectory(prefix="accessmod_elevation_") as tmpdirname:
-
         tmpdir = Path(tmpdirname)
         current_run.log_info(f"Temporary directory created at: {tmpdirname}")
 
-        # Download data 
+        # Download data
         current_run.log_info(f"Downloading of {len(tiles_name)} tiles to temporary folder")
-        tiles = download_tiles(name_list=tiles_name, 
-                               output_path=tmpdir)
+        tiles = download_tiles(name_list=tiles_name, output_path=tmpdir)
 
         if not tiles:
             raise FileNotFoundError(f"💥 No tile found at {tmpdir}")
 
         # Merge tiles and crop with raster
         current_run.log_info("Merging tiles into mosaic and cropping with buffered geometry...")
-        mosaic = merge_crop_tiles(tiles=tiles,
-                                  boundaries_path=output_dir / "buffered_geom.gpkg",
-                                  output_dir=output_dir)
+
+        mosaic = merge_crop_tiles(
+            tiles=tiles, boundaries_path=output_dir / "buffered_geom.gpkg", output_dir=output_dir
+        )
 
         if not Path(mosaic).exists():
             raise RuntimeError("💥 Mosaic generation failed")
         current_run.log_info(f"Elevation raster saved at: {mosaic}")
 
         # Compute slope
-        current_run.log_info("Calculating slope...")
-        dst_file = output_dir / "slope.tif"
-        slope = compute_slope(input_file=mosaic, 
-                              output_file=dst_file)
-        
-        current_run.log_info(f"Slope raster saved at: {slope}")
+        # current_run.log_info("Calculating slope...")
+        # dst_file = output_dir / "slope.tif"
+        # slope = compute_slope(input_file=mosaic, output_file=dst_file)
 
-        current_run.log_info("🎉 Extraction of elevation data finished successfully!")
-        current_run.add_file_output(mosaic.as_posix())
-        current_run.add_file_output(slope.as_posix())
+        # current_run.log_info(f"Slope raster saved at: {slope}")
+
+        # current_run.log_info("🎉 Extraction of elevation data finished successfully!")
+        # current_run.add_file_output(mosaic.as_posix())
+        # current_run.add_file_output(slope.as_posix())
 
 
 def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
     """Loads a boundary geometry from a supported vector file format.
-    
+
     Parameters
     ----------
     file_path : Path
         Path to the vector file containing boundary geometries.
-    
+
     Returns
     -------
     geopandas.GeoDataFrame
@@ -126,8 +136,9 @@ def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
 
     suffixes = (".gpkg", ".parquet", ".geojson", ".shp")
     if not str(file_path).endswith(suffixes):
-        raise ValueError("💥 File not in a correct format. " 
-                        " Import it as .gpkg, .parquet, .geojson or .shp.")
+        raise ValueError(
+            "💥 File not in a correct format.  Import it as .gpkg, .parquet, .geojson or .shp."
+        )
 
     if str(file_path).endswith(".parquet"):
         return gpd.read_parquet(file_path)
@@ -135,9 +146,9 @@ def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
     return gpd.read_file(file_path)
 
 
-def get_buffered_geom(boundaries: gpd.GeoDataFrame, 
-               buffer: float, 
-               output_dir: Path) -> tuple[float, float, float, float]:
+def get_buffered_geom(
+    boundaries: gpd.GeoDataFrame, buffer: float, output_dir: Path
+) -> tuple[float, float, float, float]:
     """Create a buffered geometry from an area of interest and save it.
 
     Parameters
@@ -157,8 +168,9 @@ def get_buffered_geom(boundaries: gpd.GeoDataFrame,
     geom = boundaries.to_crs("EPSG:4326").union_all()
     buffered_geom = geom.buffer(buffer)
 
-    gpd.GeoDataFrame(geometry=[buffered_geom], 
-                     crs="EPSG:4326").to_file(output_dir / "buffered_geom.gpkg")
+    gpd.GeoDataFrame(geometry=[buffered_geom], crs="EPSG:4326").to_file(
+        output_dir / "buffered_geom.gpkg"
+    )
 
     return buffered_geom
 
@@ -176,22 +188,28 @@ def find_intersecting_tiles(target_geom: Polygon) -> list[str]:
     list[str]
         List of intersecting tile names.
     """
-    tiles = []
     minx, miny, maxx, maxy = target_geom.bounds
 
-    for lat in range(int(miny) - 1, int(maxy) + 1, 1):
-        for lon in range(int(minx) - 1, int(maxx) + 1, 1):
+    grid_polygons = []
+    grid_names = []
+
+    for lat in np.arange(math.floor(miny) - 1, math.ceil(maxy) + 1):
+        for lon in np.arange(math.floor(minx) - 1, math.ceil(maxx) + 1):
+            grid_polygons.append(box(lon, lat, lon + 1, lat + 1))
+
             ns = "N" if lat >= 0 else "S"
             ew = "E" if lon >= 0 else "W"
             name = f"Copernicus_DSM_COG_10_{ns}{abs(lat):02d}_00_{ew}{abs(lon):03d}_00_DEM"
-            tiles.append(name)
+            grid_names.append(name)
 
-    return tiles
+    grid = gpd.GeoDataFrame({"name": grid_names, "geometry": grid_polygons}, crs="EPSG:4326")
+
+    return grid[grid.intersects(target_geom)]["name"].tolist()
 
 
 def download_tiles(name_list: list[str], output_path: Path) -> list[str]:
     """Download raster tiles from ESA S3 bucket into the specified directory.
-    
+
     Parameters
     ----------
     name_list : list[str]
@@ -208,36 +226,29 @@ def download_tiles(name_list: list[str], output_path: Path) -> list[str]:
     s3 = boto3.client("s3", region_name="eu-central-1", config=Config(signature_version=UNSIGNED))
 
     downloaded_files = []
+    total = len(name_list)
 
-    for name in name_list:
+    for i, name in enumerate(name_list, start=1):
         output_file = output_path / f"{name}.tif"
 
-        if output_file.exists():
-            current_run.log_info(f"Tile already exists: {output_file}")
-            downloaded_files.append(str(output_file))
-            continue
-
-        # Check if the tile exists 
         try:
-            s3.head_object(Bucket="copernicus-dem-30m", Key=f"{name}/{name}.tif")
+            # s3.head_object(Bucket="copernicus-dem-30m", Key=f"{name}/{name}.tif")
+            if i == 1 or i % 10 == 0 or i == total:
+                current_run.log_info(f"[{i}/{total}] Processing tiles ({(i / total) * 100:.1f}%)")
+            s3.download_file("copernicus-dem-30m", f"{name}/{name}.tif", str(output_file))
+            downloaded_files.append(str(output_file))
         except s3.exceptions.ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 current_run.log_info(f"Tile does not exist in S3, skipping: {name}")
                 continue
             raise
 
-        # Download the tile
-        s3.download_file("copernicus-dem-30m", f"{name}/{name}.tif", str(output_file))
-        downloaded_files.append(str(output_file))
-
     return downloaded_files
 
 
-def merge_crop_tiles(tiles: list[str], 
-                     boundaries_path: Path, 
-                     output_dir: Path) -> Path:
+def merge_crop_tiles(tiles: list[str], boundaries_path: Path, output_dir: Path) -> Path:
     """Merges single-band raster tiles into a single mosaic raster.
-     
+
     The mosaic is croped using a buffered geometry of interest.
 
     Parameters
@@ -258,14 +269,19 @@ def merge_crop_tiles(tiles: list[str],
     output_file = output_dir / "mosaic.tif"
     cmd = [
         "gdalwarp",
-        "-cutline", str(boundaries_path),
-        "-crop_to_cutline",           # crop the raster with geometry of interest define line before
-        "-multi",                     # multithreaded warping implementation 
-        "-wm", "8192",                # RAM usage 
-        "-wo", "NUM_THREADS=ALL_CPUS",
-        "-co", "COMPRESS=ZSTD",    # compress 
+        "-cutline",
+        str(boundaries_path),
+        "-crop_to_cutline",  # crop the raster with geometry of interest define line before
+        "-multi",  # multithreaded warping implementation
+        "-wm",
+        "8192",  # RAM usage
+        "-wo",
+        "NUM_THREADS=ALL_CPUS",
+        "-co",
+        "COMPRESS=ZSTD",  # compress
         "-overwrite",
-        "-of", "COG",
+        "-of",
+        "COG",
     ]
 
     cmd.extend(tiles)
@@ -276,10 +292,9 @@ def merge_crop_tiles(tiles: list[str],
     return output_file
 
 
-def compute_slope(input_file: Path, 
-                  output_file: Path) -> Path:
+def compute_slope(input_file: Path, output_file: Path) -> Path:
     """Compute slope raster from an elevation raster with GDAL.
-    
+
     Parameters
     ----------
     input_file : Path
@@ -298,26 +313,28 @@ def compute_slope(input_file: Path,
 
     scale = None
     if not src_ds.GetSpatialRef().IsProjected():
-        # because source ref system is EPSG:4326 + slope computed in meters 
-        scale = 111120   
+        # because source ref system is EPSG:4326 + slope computed in meters
+        scale = 111120
         # If it was in feet: scale = 370400
 
     options = gdal.DEMProcessingOptions(
         format="COG",
-        scale=scale,    # ratio of vertical units to horizontal
+        scale=scale,  # ratio of vertical units to horizontal
         slopeFormat="degree",
-        creationOptions=["COMPRESS=ZSTD",
-                         "PREDICTOR=2",
-                         "NUM_THREADS=ALL_CPUS",
-                         ])
-    
+        creationOptions=[
+            "COMPRESS=LZW",
+            "PREDICTOR=2",
+            "NUM_THREADS=ALL_CPUS",
+        ],
+    )
+
     gdal.DEMProcessing(str(output_file), str(input_file), "slope", options=options)
 
     if not output_file.exists():
         raise RuntimeError("💥 Slope computation failed.")
 
     src_ds = None  # Close dataset
-    
+
     return output_file
 
 
