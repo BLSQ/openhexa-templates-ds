@@ -15,16 +15,6 @@ from shapely.geometry import Polygon, box
 
 gdal.UseExceptions()
 
-RASTERIO_DEFAULT_PROFILE = {
-    "driver": "GTiff",
-    "tiled": True,
-    "blockxsize": 256,
-    "blockysize": 256,
-    "compress": "zstd",
-    "predictor": 2,
-    "num_threads": "all_cpus",
-}
-
 
 @pipeline("elevation")
 @parameter(
@@ -96,24 +86,23 @@ def generate_elevation_raster(boundaries_file: str, output_dir: str):
         # Merge tiles and crop with raster
         current_run.log_info("Merging tiles into mosaic and cropping with buffered geometry...")
 
-        mosaic = merge_crop_tiles(
+        mosaic, mosaic_cog = merge_crop_tiles(
             tiles=tiles, boundaries_path=output_dir / "buffered_geom.gpkg", output_dir=output_dir
         )
 
         if not Path(mosaic).exists():
             raise RuntimeError("💥 Mosaic generation failed")
-        current_run.log_info(f"Elevation raster saved at: {mosaic}")
+        current_run.log_info(f"Elevation raster saved at: {mosaic}, and COG at: {mosaic_cog}")
 
         # Compute slope
-        # current_run.log_info("Calculating slope...")
-        # dst_file = output_dir / "slope.tif"
-        # slope = compute_slope(input_file=mosaic, output_file=dst_file)
+        current_run.log_info("Calculating slope...")
+        slope, slope_cog = compute_slope(input_file=mosaic, output_dir=output_dir)
 
-        # current_run.log_info(f"Slope raster saved at: {slope}")
+        current_run.log_info(f"Slope raster saved at: {slope}, and COG: {slope_cog}")
 
-        # current_run.log_info("🎉 Extraction of elevation data finished successfully!")
-        # current_run.add_file_output(mosaic.as_posix())
-        # current_run.add_file_output(slope.as_posix())
+        current_run.log_info("🎉 Extraction of elevation data finished successfully!")
+        current_run.add_file_output(mosaic.as_posix())
+        current_run.add_file_output(slope.as_posix())
 
 
 def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
@@ -246,6 +235,38 @@ def download_tiles(name_list: list[str], output_path: Path) -> list[str]:
     return downloaded_files
 
 
+def save_raster_as_cog(input_raster_path: Path, output_raster_path: Path) -> Path:
+    """Save raster in Cloud Optimized Geotiff format.
+
+    Parameters
+    ----------
+    input_raster_path: Path
+        Path to the input raster.
+    output_raster_path: Path
+        Path to the output raster.
+
+    Returns
+    -------
+    Path
+        Path to the COG raster.
+    """
+    options = gdal.TranslateOptions(
+        format="COG",
+        creationOptions=[
+            "COMPRESS=DEFLATE",
+            "BLOCKSIZE=256",
+            "PREDICTOR=YES",
+            "BIGTIFF=IF_SAFER",
+            "NUM_THREADS=ALL_CPUS",
+        ],
+    )
+
+    gdal.Translate(str(output_raster_path), str(input_raster_path), options=options)
+    current_run.add_file_output(output_raster_path.as_posix())
+
+    return output_raster_path
+
+
 def merge_crop_tiles(tiles: list[str], boundaries_path: Path, output_dir: Path) -> Path:
     """Merges single-band raster tiles into a single mosaic raster.
 
@@ -264,7 +285,7 @@ def merge_crop_tiles(tiles: list[str], boundaries_path: Path, output_dir: Path) 
     Returns
     -------
     Path
-        Path to the resulting cropped mosaic raster.
+        Path to the resulting cropped mosaic rasters (geotiff and COG formats).
     """
     output_file = output_dir / "mosaic.tif"
     cmd = [
@@ -289,24 +310,29 @@ def merge_crop_tiles(tiles: list[str], boundaries_path: Path, output_dir: Path) 
 
     subprocess.run(cmd, check=True)
 
-    return output_file
+    output_file_cog = save_raster_as_cog(
+        input_raster_path=output_file, output_raster_path=output_dir / "mosaic_COG.tif"
+    )
+
+    return output_file, output_file_cog
 
 
-def compute_slope(input_file: Path, output_file: Path) -> Path:
+def compute_slope(input_file: Path, output_dir: Path) -> Path:
     """Compute slope raster from an elevation raster with GDAL.
 
     Parameters
     ----------
     input_file : Path
         Path to the input elevation raster (DEM).
-    output_file : Path
+    output_dir : Path
         Path where the output slope raster will be written.
 
     Returns
     -------
     Path
-        Path to the generated slope raster.
+        Path to the generated slope rasters (geotiff and COG formats).
     """
+    output_file = output_dir / "slope.tif"
     src_ds = gdal.Open(str(input_file))
     if src_ds is None:
         raise RuntimeError(f"💥 Unable to open {input_file}")
@@ -316,6 +342,8 @@ def compute_slope(input_file: Path, output_file: Path) -> Path:
         # because source ref system is EPSG:4326 + slope computed in meters
         scale = 111120
         # If it was in feet: scale = 370400
+
+    src_ds = None  # Close dataset
 
     options = gdal.DEMProcessingOptions(
         format="COG",
@@ -333,9 +361,11 @@ def compute_slope(input_file: Path, output_file: Path) -> Path:
     if not output_file.exists():
         raise RuntimeError("💥 Slope computation failed.")
 
-    src_ds = None  # Close dataset
+    output_file_cog = save_raster_as_cog(
+        input_raster_path=output_file, output_raster_path=output_dir / "slope_COG.tif"
+    )
 
-    return output_file
+    return output_file, output_file_cog
 
 
 if __name__ == "__main__":
