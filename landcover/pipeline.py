@@ -1,3 +1,4 @@
+import math
 import subprocess
 import tempfile
 from datetime import datetime
@@ -8,7 +9,7 @@ import geopandas as gpd
 from botocore import UNSIGNED
 from botocore.config import Config
 from openhexa.sdk import current_run, parameter, pipeline, workspace
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, box
 
 
 @pipeline("landcover")
@@ -17,9 +18,9 @@ from shapely.geometry import Polygon
     name="Boundaries input file path",
     help="Input fileof geometry of interest (should be located in Files).",
     type=str,
-    default="workspace/DRC.gpkg",
+    default="workspace/Haut_Katanga.gpkg",
     required=True,
-    multiple=False
+    multiple=False,
 )
 @parameter(
     "output_dir",
@@ -28,14 +29,14 @@ from shapely.geometry import Polygon
     type=str,
     required=False,
     default="landcover",
-    multiple=False
+    multiple=False,
 )
 def generate_landcover_raster(boundaries_file: str, output_dir: str):
     """Generate a landcover raster from ESA.
 
     This function extracts ESA tiles intersecting the input boundary,
-    merges them into a single mosaic, crops it according to the buffered geometry. 
-    The resulting landcover is saved as .tif file in the specified output directory. 
+    merges them into a single mosaic, crops it according to the buffered geometry.
+    The resulting landcover is saved as .tif file in the specified output directory.
 
     Parameters
     ----------
@@ -51,13 +52,13 @@ def generate_landcover_raster(boundaries_file: str, output_dir: str):
         output_dir = Path(workspace.files_path) / output_dir
         output_dir /= datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     current_run.log_info(f"Output directory path defined: {output_dir}")
-    
+
     # Load boundaries
     boundaries = read_boundaries(Path(boundaries_file))
 
-    # Add buffer and save for later 
+    # Add buffer and save for later
     target_geom = get_buffered_geom(boundaries=boundaries, buffer=0.2, output_dir=output_dir)
 
     # Determine which tiles intersect the boundaries
@@ -67,41 +68,39 @@ def generate_landcover_raster(boundaries_file: str, output_dir: str):
         raise RuntimeError("💥 No ESA WorldCover tile intersects the input geometry.")
 
     with tempfile.TemporaryDirectory(prefix="accessmod_landcover_") as tmpdirname:
-
         tmpdir = Path(tmpdirname)
         current_run.log_info(f"Temporary directory created at: {tmpdir}")
 
-        # Download data 
+        # Download data
         current_run.log_info(f"Downloading of {len(tiles_name)} tiles to temporary folder")
-        tiles = download_tiles(name_list=tiles_name, 
-                               output_path=tmpdir)
-        
+        tiles = download_tiles(name_list=tiles_name, output_path=tmpdir)
+
         if not tiles:
             raise FileNotFoundError(f"💥 No tiles found at {tmpdir}")
 
         # Merge tiles and crop
         current_run.log_info("Merging tiles into mosaic and cropping with buffered geometry...")
-        mosaic = merge_crop_tiles(tiles=tiles,
-                                  boundaries_path=output_dir / "buffered_geom.gpkg",
-                                  output_dir=output_dir)
-        
+        mosaic = merge_crop_tiles(
+            tiles=tiles, boundaries_path=output_dir / "buffered_geom.gpkg", output_dir=output_dir
+        )
+
         if not Path(mosaic).exists():
             raise RuntimeError("💥 Mosaic generation failed")
-        
-        current_run.log_info(f"Final landcover raster saved at: {mosaic}")
 
-        current_run.log_info("🎉 Extraction of landcover data finished successfully!")
-        current_run.add_file_output(mosaic.as_posix())
+    current_run.log_info(f"Final landcover raster saved at: {mosaic}")
+
+    current_run.log_info("🎉 Extraction of landcover data finished successfully!")
+    current_run.add_file_output(mosaic.as_posix())
 
 
 def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
     """Loads a boundary geometry from a supported vector file format.
-    
+
     Parameters
     ----------
     file_path : Path
         Path to the vector file containing boundary geometries.
-    
+
     Returns
     -------
     geopandas.GeoDataFrame
@@ -122,9 +121,9 @@ def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
     return gpd.read_file(file_path)
 
 
-def get_buffered_geom(boundaries: gpd.GeoDataFrame, 
-                      buffer: float, 
-                      output_dir: Path) -> tuple[float, float, float, float]:
+def get_buffered_geom(
+    boundaries: gpd.GeoDataFrame, buffer: float, output_dir: Path
+) -> tuple[float, float, float, float]:
     """Create a buffered geometry from an area of interest and save it.
 
     Parameters
@@ -144,8 +143,9 @@ def get_buffered_geom(boundaries: gpd.GeoDataFrame,
     geom = boundaries.to_crs("EPSG:4326").union_all()
     buffered_geom = geom.buffer(buffer)
 
-    gpd.GeoDataFrame(geometry=[buffered_geom], 
-                     crs="EPSG:4326").to_file(output_dir / "buffered_geom.gpkg")
+    gpd.GeoDataFrame(geometry=[buffered_geom], crs="EPSG:4326").to_file(
+        output_dir / "buffered_geom.gpkg"
+    )
 
     return buffered_geom
 
@@ -166,20 +166,22 @@ def find_intersecting_tiles(target_geom: Polygon) -> list[str]:
     tiles = []
     minx, miny, maxx, maxy = target_geom.bounds
 
-    for lat in range(int(miny // 3 * 3), int(maxy // 3 * 3) + 3, 3):
-        for lon in range(int(minx // 3 * 3), int(maxx // 3 * 3) + 3, 3):
-            ns = "N" if lat >= 0 else "S"
-            ew = "E" if lon >= 0 else "W"
-            name = f"ESA_WorldCover_10m_2021_v200_{ns}{abs(lat):02d}{ew}{abs(lon):03d}_Map.tif"
-            tiles.append(name)
+    for lat in range(math.floor(miny / 3) * 3, math.ceil(maxy / 3) * 3, 3):
+        for lon in range(math.floor(minx / 3) * 3, math.ceil(maxx / 3) * 3, 3):
+            tile_geom = box(lon, lat, lon + 3, lat + 3)
+
+            if tile_geom.intersects(target_geom):
+                ns = "N" if lat >= 0 else "S"
+                ew = "E" if lon >= 0 else "W"
+                name = f"ESA_WorldCover_10m_2021_v200_{ns}{abs(lat):02d}{ew}{abs(lon):03d}_Map.tif"
+                tiles.append(name)
 
     return tiles
 
 
-def download_tiles(name_list: list[str], 
-                   output_path: Path) -> list[str]:
+def download_tiles(name_list: list[str], output_path: Path) -> list[str]:
     """Download raster tiles from ESA S3 bucket into the specified directory.
-    
+
     Parameters
     ----------
     name_list : list[str]
@@ -199,15 +201,11 @@ def download_tiles(name_list: list[str],
     for name in name_list:
         output_file = output_path / name
 
-        if output_file.exists():
-            current_run.log_info(f"Tile already exists: {output_file}")
-            downloaded_files.append(str(output_file))
-            continue
-
         path = f"v200/2021/map/{name}"
 
         try:
             s3.head_object(Bucket="esa-worldcover", Key=path)
+
         except s3.exceptions.ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 current_run.log_info(f"Tile does not exist in S3, skipping: {name}")
@@ -216,15 +214,13 @@ def download_tiles(name_list: list[str],
 
         s3.download_file("esa-worldcover", path, str(output_file))
         downloaded_files.append(str(output_file))
-    
+
     return downloaded_files
 
 
-def merge_crop_tiles(tiles: list[str], 
-                     boundaries_path: Path, 
-                     output_dir: Path) -> Path:
+def merge_crop_tiles(tiles: list[str], boundaries_path: Path, output_dir: Path) -> Path:
     """Merges single-band raster tiles into a single mosaic raster.
-     
+
     The mosaic is croped using a buffered geometry of interest.
 
     Parameters
@@ -246,19 +242,22 @@ def merge_crop_tiles(tiles: list[str],
     cmd = [
         "gdalwarp",
         "-cutline", str(boundaries_path),
-        "-crop_to_cutline",               # crop the raster with geometry of interest
-        "-multi",                         # multithreaded warping implementation 
-        "-wm", "8192",                    # RAM usage 
+        "-crop_to_cutline",
+        "-multi",
+        "-wm", "8192",
         "-wo", "NUM_THREADS=ALL_CPUS",
-        "-co", "COMPRESS=DEFLATE",        # compress 
-        "-of", "COG",
+        "-co", "COMPRESS=DEFLATE",
+        "-co", "TILED=YES",
         "-overwrite",
     ]
 
     cmd.extend(tiles)
     cmd.append(output_file)
 
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except Exception as e:
+        current_run.log_info(f"Could not run the merge command: {e}")
 
     return output_file
 
