@@ -9,6 +9,7 @@ import geopandas as gpd
 from botocore import UNSIGNED
 from botocore.config import Config
 from openhexa.sdk import current_run, parameter, pipeline, workspace
+from osgeo import gdal
 from shapely.geometry import Polygon, box
 
 
@@ -80,17 +81,18 @@ def generate_landcover_raster(boundaries_file: str, output_dir: str):
 
         # Merge tiles and crop
         current_run.log_info("Merging tiles into mosaic and cropping with buffered geometry...")
-        mosaic = merge_crop_tiles(
+        mosaic, mosaic_cog = merge_crop_tiles(
             tiles=tiles, boundaries_path=output_dir / "buffered_geom.gpkg", output_dir=output_dir
         )
 
         if not Path(mosaic).exists():
             raise RuntimeError("💥 Mosaic generation failed")
 
-    current_run.log_info(f"Final landcover raster saved at: {mosaic}")
+    current_run.log_info(f"Final landcover raster saved at: {mosaic}, and COG raster: {mosaic_cog}")
 
     current_run.log_info("🎉 Extraction of landcover data finished successfully!")
     current_run.add_file_output(mosaic.as_posix())
+    current_run.add_file_output(mosaic_cog.as_posix())
 
 
 def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
@@ -218,7 +220,9 @@ def download_tiles(name_list: list[str], output_path: Path) -> list[str]:
     return downloaded_files
 
 
-def merge_crop_tiles(tiles: list[str], boundaries_path: Path, output_dir: Path) -> Path:
+def merge_crop_tiles(
+    tiles: list[str], boundaries_path: Path, output_dir: Path
+) -> tuple[Path, Path]:
     """Merges single-band raster tiles into a single mosaic raster.
 
     The mosaic is croped using a buffered geometry of interest.
@@ -236,18 +240,24 @@ def merge_crop_tiles(tiles: list[str], boundaries_path: Path, output_dir: Path) 
     Returns
     -------
     Path
-        Path to the resulting cropped mosaic raster.
+        Path to the resulting cropped mosaic rasters (geotiff and Cloud Optimized Geotiff).
     """
     output_file = output_dir / "landcover.tif"
+    output_cog_file = output_dir / "landcover_COG.tif"
     cmd = [
         "gdalwarp",
-        "-cutline", str(boundaries_path),
+        "-cutline",
+        str(boundaries_path),
         "-crop_to_cutline",
         "-multi",
-        "-wm", "8192",
-        "-wo", "NUM_THREADS=ALL_CPUS",
-        "-co", "COMPRESS=DEFLATE",
-        "-co", "TILED=YES",
+        "-wm",
+        "8192",
+        "-wo",
+        "NUM_THREADS=ALL_CPUS",
+        "-co",
+        "COMPRESS=DEFLATE",
+        "-co",
+        "TILED=YES",
         "-overwrite",
     ]
 
@@ -259,7 +269,20 @@ def merge_crop_tiles(tiles: list[str], boundaries_path: Path, output_dir: Path) 
     except Exception as e:
         current_run.log_info(f"Could not run the merge command: {e}")
 
-    return output_file
+    options = gdal.TranslateOptions(
+        format="COG",
+        creationOptions=[
+            "COMPRESS=LZW",
+            "BLOCKSIZE=512",
+            "PREDICTOR=2",
+            "BIGTIFF=IF_SAFER",
+            "NUM_THREADS=ALL_CPUS",
+        ],
+    )
+
+    gdal.Translate(str(output_cog_file), str(output_file), options=options)
+
+    return output_file, output_cog_file
 
 
 if __name__ == "__main__":
