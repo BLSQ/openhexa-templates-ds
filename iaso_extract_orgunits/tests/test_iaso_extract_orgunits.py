@@ -178,7 +178,7 @@ def test_export_to_file(
     output: Path = tmp_path / "file.csv"
     mock_path.return_value = output
 
-    result: Path = export_to_file(
+    result = export_to_file.function(
         output_format=".csv",
         org_units_df=df,
         ou_type_id=None,
@@ -205,7 +205,7 @@ def test_export_to_database(
     geo_df: MagicMock = MagicMock()
     mock_prepare.return_value = geo_df
 
-    export_to_database(pl.DataFrame(), "table", "replace")
+    export_to_database.function(pl.DataFrame(), "table", "replace")
 
     geo_df.to_postgis.assert_called_once()
     geo_df.to_postgis.assert_called_with(
@@ -236,7 +236,7 @@ def test_export_to_dataset(
     mock_dataset.latest_version = None
     mock_dataset.create_version.return_value = mock_version
 
-    export_to_dataset(file_path, mock_dataset)
+    export_to_dataset.function(file_path, mock_dataset)
 
     mock_dataset.create_version.assert_called_once()
     mock_version.add_file.assert_called_once()
