@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import TypeAlias
 
 from rapidfuzz import fuzz, process
 from shapely.geometry.base import BaseGeometry
