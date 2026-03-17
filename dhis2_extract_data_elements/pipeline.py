@@ -178,7 +178,7 @@ def dhis2_extract_data_elements(
     meta = extract_metadata(dhis2_connection=src_dhis2)
     data = extract_data(dhis2_connection=src_dhis2, params=params)
     data = add_names(data_values=data, metadata=meta)
-    validate(data_values=data)
+    validate(df=data)
 
     if dst_file:
         write_to_file(data_values=data, dst_file=dst_file)
