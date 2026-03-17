@@ -41,7 +41,7 @@ from shapely.geometry.base import BaseGeometry
     connection="dhis2_connection",
 )
 @parameter(
-    "output_path",
+    "output_path_param",
     name="Output path",
     type=str,
     help="Output path for the shapes",
@@ -50,17 +50,17 @@ from shapely.geometry.base import BaseGeometry
 )
 def dhis2_shapes_extract(
     dhis2_connection: DHIS2Connection,
-    org_unit_level: list[str] | None,
-    output_path: str | None = None,
+    org_unit_level: str,
+    output_path_param: str | None = None,
 ) -> None:
     """Main pipeline function to extract shapes from a DHIS2 instance."""
     current_run.log_info("Shapes pipeline started")
 
-    if output_path is None:
+    if output_path_param is None:
         output_path = Path(workspace.files_path) / "pipelines" / "dhis2_shapes_extract"
         current_run.log_info(f"Output path not specified, using default {output_path}")
     else:
-        output_path = Path(output_path)
+        output_path = Path(workspace.files_path) / output_path_param
 
     try:
         retrieve_shapes(dhis2_connection, org_unit_level, output_path=output_path)
@@ -92,7 +92,7 @@ def get_dhis2_client(dhis2_connection: DHIS2Connection) -> DHIS2:
 
 def retrieve_shapes(
     dhis2_connection: DHIS2Connection,
-    org_level_id: str,
+    org_level_id: str | None,
     output_path: Path,
     geometry_column: str = "geometry",
 ) -> None:
@@ -102,7 +102,7 @@ def retrieve_shapes(
     ----------
     dhis2_connection : DHIS2Connection
         The connection to the DHIS2 instance.
-    org_level_id : str
+    org_level_id : str | None
         The organizational unit level uid to retrieve shapes for.
     output_path : Path
         The directory where the shapes will be saved.
