@@ -10,7 +10,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/blsq/openhexa-blsq-environment:1.17.2
+      image: blsq/openhexa-blsq-environment:1.17.2
       options: --user root
     steps:
       - uses: actions/checkout@v4
