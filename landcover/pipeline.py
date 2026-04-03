@@ -19,7 +19,7 @@ from shapely.geometry import Polygon, box
     name="Boundaries input file path",
     help="Input fileof geometry of interest (should be located in Files).",
     type=str,
-    default="workspace/Haut_Katanga.gpkg",
+    default="Haut_Katanga.gpkg",
     required=True,
     multiple=False,
 )
@@ -47,7 +47,6 @@ def generate_landcover_raster(boundaries_file: str, output_dir: str):
         Directory where the final elevation and slope raster files will be saved.
         If it does not exist, it will be created.
     """
-    # Prepare output directory path
     output_dir = Path(output_dir)
     if not output_dir.exists():
         output_dir = Path(workspace.files_path) / output_dir
@@ -56,43 +55,27 @@ def generate_landcover_raster(boundaries_file: str, output_dir: str):
 
     current_run.log_info(f"Output directory path defined: {output_dir}")
 
-    # Load boundaries
     boundaries = read_boundaries(Path(boundaries_file))
-
-    # Add buffer and save for later
     target_geom = get_buffered_geom(boundaries=boundaries, buffer=0.2, output_dir=output_dir)
 
-    # Determine which tiles intersect the boundaries
     tiles_name = find_intersecting_tiles(target_geom=target_geom)
-
-    if not tiles_name:
-        raise RuntimeError("💥 No ESA WorldCover tile intersects the input geometry.")
 
     with tempfile.TemporaryDirectory(prefix="accessmod_landcover_") as tmpdirname:
         tmpdir = Path(tmpdirname)
-        current_run.log_info(f"Temporary directory created at: {tmpdir}")
 
-        # Download data
         current_run.log_info(f"Downloading of {len(tiles_name)} tiles to temporary folder")
         tiles = download_tiles(name_list=tiles_name, output_path=tmpdir)
 
-        if not tiles:
-            raise FileNotFoundError(f"💥 No tiles found at {tmpdir}")
-
-        # Merge tiles and crop
         current_run.log_info("Merging tiles into mosaic and cropping with buffered geometry...")
-        mosaic, mosaic_cog = merge_crop_tiles(
-            tiles=tiles, boundaries_path=output_dir / "buffered_geom.gpkg", output_dir=output_dir
+        mosaic = merge_crop_tiles(
+            tiles=tiles,
+            boundaries_path=output_dir / "buffered_geom.gpkg",
+            tmp_dir=tmpdir,
+            output_dir=output_dir,
         )
 
-        if not Path(mosaic).exists():
-            raise RuntimeError("💥 Mosaic generation failed")
-
-    current_run.log_info(f"Final landcover raster saved at: {mosaic}, and COG raster: {mosaic_cog}")
-
-    current_run.log_info("🎉 Extraction of landcover data finished successfully!")
+    current_run.log_info(f"Final landcover raster saved at: {mosaic}")
     current_run.add_file_output(mosaic.as_posix())
-    current_run.add_file_output(mosaic_cog.as_posix())
 
 
 def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
@@ -108,6 +91,7 @@ def read_boundaries(file_path: Path) -> gpd.GeoDataFrame:
     geopandas.GeoDataFrame
         GeoDataFrame containing the loaded boundary geometries.
     """
+    file_path = workspace.files_path / file_path
     if not file_path.is_file():
         msg = f"File {file_path} not found in Files"
         current_run.log_error(msg)
@@ -178,6 +162,9 @@ def find_intersecting_tiles(target_geom: Polygon) -> list[str]:
                 name = f"ESA_WorldCover_10m_2021_v200_{ns}{abs(lat):02d}{ew}{abs(lon):03d}_Map.tif"
                 tiles.append(name)
 
+    if not tiles:
+        raise RuntimeError("💥 No ESA WorldCover tile intersects the input geometry.")
+
     return tiles
 
 
@@ -202,11 +189,12 @@ def download_tiles(name_list: list[str], output_path: Path) -> list[str]:
     downloaded_files = []
     for name in name_list:
         output_file = output_path / name
-
         path = f"v200/2021/map/{name}"
 
         try:
             s3.head_object(Bucket="esa-worldcover", Key=path)
+            s3.download_file("esa-worldcover", path, str(output_file))
+            downloaded_files.append(str(output_file))
 
         except s3.exceptions.ClientError as e:
             if e.response["Error"]["Code"] == "404":
@@ -214,14 +202,14 @@ def download_tiles(name_list: list[str], output_path: Path) -> list[str]:
                 continue
             raise
 
-        s3.download_file("esa-worldcover", path, str(output_file))
-        downloaded_files.append(str(output_file))
+    if not downloaded_files:
+        raise FileNotFoundError(f"💥 No tile found at {output_path}")
 
     return downloaded_files
 
 
 def merge_crop_tiles(
-    tiles: list[str], boundaries_path: Path, output_dir: Path
+    tiles: list[str], boundaries_path: Path, tmp_dir: Path, output_dir: Path
 ) -> tuple[Path, Path]:
     """Merges single-band raster tiles into a single mosaic raster.
 
@@ -234,6 +222,8 @@ def merge_crop_tiles(
     boundaries_path : Path
         Path to the boundaries file whose geometry has been buffered.
         The geometry will be reprojected to EPSG:4326 if necessary.
+    tmp_dir: Path
+        Temporary directory to store premary result of the merge.
     output_dir : Path
         Directory where the buffered geometry and mosaic raster will be saved.
 
@@ -242,8 +232,8 @@ def merge_crop_tiles(
     Path
         Path to the resulting cropped mosaic rasters (geotiff and Cloud Optimized Geotiff).
     """
-    output_file = output_dir / "landcover.tif"
-    output_cog_file = output_dir / "landcover_COG.tif"
+    output_file = tmp_dir / "landcover.tif"
+    output_cog_file = output_dir / "landcover.tif"
     cmd = [
         "gdalwarp",
         "-cutline",
@@ -255,34 +245,34 @@ def merge_crop_tiles(
         "-wo",
         "NUM_THREADS=ALL_CPUS",
         "-co",
-        "COMPRESS=DEFLATE",
+        "COMPRESS=ZSTD",
+        "-co",
+        "ZSTD_LEVEL=1",
         "-co",
         "TILED=YES",
+        "BIGTIFF=YES",
         "-overwrite",
     ]
 
     cmd.extend(tiles)
     cmd.append(output_file)
 
-    try:
-        subprocess.run(cmd, check=True)
-    except Exception as e:
-        current_run.log_info(f"Could not run the merge command: {e}")
+    subprocess.run(cmd, check=True)
 
     options = gdal.TranslateOptions(
         format="COG",
         creationOptions=[
-            "COMPRESS=LZW",
+            "COMPRESS=ZSTD",
             "BLOCKSIZE=512",
             "PREDICTOR=2",
+            "LEVEL=3",
             "BIGTIFF=IF_SAFER",
             "NUM_THREADS=ALL_CPUS",
         ],
     )
-
     gdal.Translate(str(output_cog_file), str(output_file), options=options)
 
-    return output_file, output_cog_file
+    return output_cog_file
 
 
 if __name__ == "__main__":
