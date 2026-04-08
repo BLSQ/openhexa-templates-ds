@@ -158,9 +158,11 @@ def dhis2_extract_dataset(
     dhis2_name = get_dhis2_name_domain(dhis_con)
     all_ds = get_datasets(dhis)
     ds = all_ds.filter(pl.col("id") == dataset_id)
+    period_type = ds["period_type"].item()
     validate_ous_parameters(ou_ids, ou_group_ids)
-    start_api = isodate_to_period_type(start, ds["period_type"].item())
-    end_api = isodate_to_period_type(end, ds["period_type"].item())
+    start_api = isodate_to_period_type(start, period_type)
+    end_api = isodate_to_period_type(end, period_type)
+    set_date_range_delta(dhis, start_api)
     pyramid = get_organisation_units(dhis)
     des = get_data_elements(dhis)
     cocs = get_category_option_combos(dhis)
@@ -281,8 +283,30 @@ def get_dhis(dhis_con: DHIS2Connection, max_nb_ou_extracted: int) -> DHIS2:  # n
     """
     dhis = DHIS2(dhis_con, cache_dir=Path(workspace.files_path) / ".cache")
     dhis.data_value_sets.MAX_ORG_UNITS = max_nb_ou_extracted
-    dhis.data_value_sets.DATE_RANGE_DELTA = relativedelta.relativedelta(months=1)
     return dhis
+
+
+def set_date_range_delta(dhis: DHIS2, period: Period) -> None:
+    """Sets DATE_RANGE_DELTA on the DHIS2 object based on the dataset period type.
+
+    For period types shorter than or equal to one month, the delta is set to 1 month.
+    For longer period types, the delta matches the period duration.
+
+    Period.delta can be either a datetime.timedelta (only Day uses this) or a
+    relativedelta.relativedelta (all other period types). Both are handled explicitly.
+
+    Args:
+        dhis (DHIS2): The DHIS2 object to configure.
+        period (Period): A period object for the dataset's period type.
+    """
+    one_month = relativedelta.relativedelta(months=1)
+    delta = period.delta
+    if isinstance(delta, timedelta) or (
+        isinstance(delta, relativedelta.relativedelta) and delta.years == 0 and delta.months <= 1
+    ):
+        dhis.data_value_sets.DATE_RANGE_DELTA = one_month
+    else:
+        dhis.data_value_sets.DATE_RANGE_DELTA = delta
 
 
 def write_file(table: pl.DataFrame, dhis2_name: str, extract_name: str | None) -> str:
