@@ -197,18 +197,18 @@ def test_set_date_range_delta():
     """Test set_date_range_delta function.
 
     We test:
-    (1) Daily → 1 month. Daily uses datetime.timedelta internally (not relativedelta),
+    (1) Daily -> 1 month. Daily uses datetime.timedelta internally (not relativedelta),
         and must be capped to 1 month.
-    (2) Weekly variants (Monday–Sunday) → 1 month. These use relativedelta(weeks=1),
+    (2) Weekly variants (Monday-Sunday) -> 1 month. These use relativedelta(weeks=1),
         which is shorter than a month and must be capped.
-    (3) Monthly → 1 month. Exactly at the threshold, no change.
+    (3) Monthly -> 1 month. Exactly at the threshold, no change.
     (4) Longer period types (BiMonthly, Quarterly, SixMonthly, Yearly, Financial variants)
-        → DATE_RANGE_DELTA matches the period's natural duration.
+        -> DATE_RANGE_DELTA matches the period's natural duration.
     """
     for period, expected_delta in config.period_delta_cases:
         mock_dhis = MagicMock()
         set_date_range_delta(mock_dhis, period)
-        assert mock_dhis.data_value_sets.DATE_RANGE_DELTA == expected_delta, (
+        assert expected_delta == mock_dhis.data_value_sets.DATE_RANGE_DELTA, (
             f"Failed for {type(period).__name__}: expected {expected_delta}, "
             f"got {mock_dhis.data_value_sets.DATE_RANGE_DELTA}"
         )
