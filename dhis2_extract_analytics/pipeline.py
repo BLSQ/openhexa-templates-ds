@@ -6,6 +6,7 @@ from pathlib import Path
 
 import polars as pl
 import requests
+from dateutil import relativedelta
 from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.sdk.pipelines.parameter import DHIS2Widget, parameter
 from openhexa.sdk.pipelines.pipeline import pipeline
@@ -22,7 +23,7 @@ from openhexa.toolbox.dhis2.dataframe import (
     get_organisation_units,
     join_object_names,
 )
-from openhexa.toolbox.dhis2.periods import period_from_string
+from openhexa.toolbox.dhis2.periods import InvalidPeriodError, Period, period_from_string
 from validate import validate_data
 
 
@@ -107,14 +108,24 @@ from validate import validate_data
     code="start_period",
     type=str,
     name="Start period",
-    help="Start period for the extraction (DHIS2 format)",
-    required=True,
+    help="Start period for the extraction (DHIS2 format). "
+    "If not provided, it will be calculated as end_period - period.",
+    required=False,
 )
 @parameter(
     code="end_period",
     type=str,
     name="End period",
-    help="End period for the extraction (DHIS2 format)",
+    help="End period for the extraction (DHIS2 format). "
+    "Latest period of the same type as start_period by default."
+    " Required when start_period is not provided.",
+    required=False,
+)
+@parameter(
+    code="period",
+    type=int,
+    name="Number of months to extract",
+    help="It will only be used if start_period is not provided",
     required=False,
 )
 @parameter(
@@ -138,9 +149,9 @@ from validate import validate_data
     help="Output DB table name. If not provided, output will not be saved to a DB table.",
     required=False,
 )
-def dhis2_extract_data_elements(
+def dhis2_extract_analytics(
     src_dhis2: DHIS2Connection,
-    start_period: str,
+    start_period: str | None = None,
     data_elements: list[str] | None = None,
     data_element_groups: list[str] | None = None,
     indicators: list[str] | None = None,
@@ -149,6 +160,7 @@ def dhis2_extract_data_elements(
     org_unit_groups: list[str] | None = None,
     org_unit_levels: list[str] | None = None,
     end_period: str | None = None,
+    period: int | None = None,
     dst_file: str | None = None,
     dst_dataset: Dataset | None = None,
     dst_table: str | None = None,
@@ -176,15 +188,8 @@ def dhis2_extract_data_elements(
 
     current_run.log_info("Checking data request")
 
-    # convert start and end periods to Period objects
-    # if it is not provided, the end Period is set using the same type of the start Period
-    # and initialized with the current date
-    start = period_from_string(start_period)
-    if not end_period:
-        end = type(start)(datetime.now())
-        current_run.log_info(f"End period not provided, using latest period: {end}")
-    else:
-        end = period_from_string(end_period)
+    check_periods(start_period, end_period, period)
+    start, end = get_periods(start_period, end_period, period)
 
     # build the list of periods between start and end periods
     periods = [str(p) for p in start.get_range(end)]
@@ -212,9 +217,7 @@ def dhis2_extract_data_elements(
     current_run.log_info("Joining object names to output data")
     data_values = join_object_names(
         df=data_values,
-        data_elements=(
-            src_data_elements if "data_element_id" in data_values.columns else None
-        ),
+        data_elements=(src_data_elements if "data_element_id" in data_values.columns else None),
         indicators=src_indicators if "indicator_id" in data_values.columns else None,
         organisation_units=src_organisation_units,
         category_option_combos=(
@@ -242,6 +245,98 @@ def dhis2_extract_data_elements(
 
     if dst_table:
         write_to_db(df=data_values, table_name=dst_table)
+
+
+def get_periods(start: str | None, end: str | None, period: int | None) -> tuple[Period, Period]:
+    """Resolve start and end DHIS2 periods, applying defaults where needed.
+
+    End is resolved first since start may depend on its type.
+
+    Args:
+        start: Start period string in DHIS2 format, or None.
+        end: End period string in DHIS2 format, or None.
+        period: Number of months to look back from end_period, or None.
+
+    Returns:
+        tuple: Resolved start and end as DHIS2 Period objects.
+    """
+    if end is None:
+        end_obj = type(period_from_string(start))(datetime.now())
+        current_run.log_info(f"End period not provided, using latest period: {end_obj}")
+    else:
+        end_obj = period_from_string(end)
+
+    if start is None:
+        start_obj = type(end_obj)(end_obj.datetime - relativedelta.relativedelta(months=period))
+        current_run.log_info(f"Start period not provided, using {start_obj}")
+    else:
+        start_obj = period_from_string(start)
+
+    return start_obj, end_obj
+
+
+def check_periods(start: str | None, end: str | None, period: int | None):
+    """Check that sufficient period parameters are provided for extraction.
+
+    Unlike ISO-date pipelines, both start and end use DHIS2 period strings whose
+    type must be consistent. When start_period is not provided, end_period must be
+    given so the period type can be inferred for the relative computation.
+
+    Args:
+        start: Start period string in DHIS2 format, or None.
+        end: End period string in DHIS2 format, or None.
+        period: Number of months to look back from end_period, or None.
+
+    Raises:
+        ValueError: If neither start nor period is provided.
+        ValueError: If start is not provided and end is also not provided
+            (period type cannot be inferred).
+        ValueError: If start is after end.
+    """
+    if start is None and period is None:
+        msg = "Either start_period or period must be provided."
+        current_run.log_error(msg)
+        raise ValueError(msg)
+
+    if period is not None and period <= 0:
+        msg = "Period must be greater than 0."
+        current_run.log_error(msg)
+        raise ValueError(msg)
+
+    if start is None and end is None:
+        msg = "end_period must be provided when start_period is not provided."
+        current_run.log_error(msg)
+        raise ValueError(msg)
+
+    if start is not None:
+        try:
+            start_obj = period_from_string(start)
+        except InvalidPeriodError as e:
+            msg = f"Start period '{start}' is not a valid DHIS2 period string."
+            current_run.log_error(msg)
+            raise ValueError(msg) from e
+
+    if end is not None:
+        try:
+            end_obj = period_from_string(end)
+        except InvalidPeriodError as e:
+            msg = f"End period '{end}' is not a valid DHIS2 period string."
+            current_run.log_error(msg)
+            raise ValueError(msg) from e
+
+    if start is not None and end is not None:
+        if type(start_obj) is not type(end_obj):
+            msg = (
+                f"Start period '{start}' and end period '{end}' must be the same period type "
+                f"(got {type(start_obj).__name__} and {type(end_obj).__name__})."
+            )
+            current_run.log_error(msg)
+            raise ValueError(msg)
+
+        if start_obj.start > end_obj.start:
+            msg = f"Start period '{start}' must not be after end period '{end}'."
+            current_run.log_error(msg)
+            raise ValueError(msg)
 
 
 def default_output_path() -> Path:
@@ -317,9 +412,7 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     """
     if dataset.latest_version is not None:
         if in_dataset_version(file=fp, dataset_version=dataset.latest_version):
-            current_run.log_info(
-                "File is already in the dataset and no changes have been detected"
-            )
+            current_run.log_info("File is already in the dataset and no changes have been detected")
             return
 
     # increment dataset version name and create the new dataset version
@@ -331,9 +424,7 @@ def write_to_dataset(fp: Path, dataset: Dataset):
     dataset_version = dataset.create_version(name=f"v{version_number}")
 
     dataset_version.add_file(fp, "data_values.parquet")
-    current_run.log_info(
-        f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}"
-    )
+    current_run.log_info(f"File {fp.name} added to dataset {dataset.name} {dataset_version.name}")
 
 
 def md5_from_url(url: str) -> str:
