@@ -18,8 +18,9 @@ This pipeline extracts data values from a DHIS2 instance for specified data elem
 | Organisation units | List of String | No | - | IDs of organisation units to extract data from |
 | Organisation unit groups | List of String | No | - | IDs of organisation unit groups to extract data from |
 | Include children | Boolean | No | `False` | Whether to include children of the selected organisation units |
-| Start date | String | Yes | `2020-01-01` | Start date for the extraction (YYYY-MM-DD) |
-| End date | String | No | Today | End date for the extraction (YYYY-MM-DD) |
+| Start date | String | No | - | Start date for the extraction (YYYY-MM-DD). If not provided, it will be calculated as end date - period. |
+| End date | String | No | Today | End date for the extraction (YYYY-MM-DD). |
+| Number of months to extract | int | No | - | If no start date is provided, the start date will be calculated as the end date minus this number of months. |
 | Output file | String | No | Auto-generated | Custom output file path in workspace |
 | Output dataset | Dataset | No | - | OpenHEXA dataset. A new version will be created if new content is detected |
 | Output DB table | String | No | - | Database table name for storing the extracted data |
@@ -106,7 +107,8 @@ If the validation fails, the pipeline raises an error and stops execution.
 }%%
 flowchart TD
     A[Connect to DHIS2]
-    A --> C[Fetch metadata]
+    A --> B[Validate and resolve dates]
+    B --> C[Fetch metadata]
     C --> C1[Data Elements]
     C --> C2[Indicators]
     C --> C3[Organisation Units]

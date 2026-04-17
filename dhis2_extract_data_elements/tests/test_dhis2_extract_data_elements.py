@@ -1,12 +1,15 @@
+import re
 import sys
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import polars as pl
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from pipeline import RequestParams, validate, validate_parameters
+from pipeline import RequestParams, check_dates, get_dates, validate, validate_parameters
 from validate import DataValidationError
 
 
@@ -96,3 +99,84 @@ def test_validate_data() -> None:
     df_extra = df.with_columns(pl.lit("x").alias("unexpected_col"))
     with pytest.raises(DataValidationError):
         validate(df_extra).run()
+
+
+def test_check_dates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test check_dates function.
+
+    We test:
+    (1) Raises ValueError when neither start nor period is provided.
+    (2) Raises ValueError when period is not greater than 0.
+    (3) Raises ValueError when start is after end.
+    (4) Valid combinations do not raise.
+    """
+    mock_run = MagicMock()
+    monkeypatch.setattr("pipeline.run", mock_run)
+
+    with pytest.raises(
+        ValueError, match=re.escape("Either start date or period must be provided.")
+    ):
+        check_dates(None, None, None)
+
+    with pytest.raises(
+        ValueError, match=re.escape("Either start date or period must be provided.")
+    ):
+        check_dates(None, "2025-06-01", None)
+
+    with pytest.raises(ValueError, match=re.escape("Period must be greater than 0.")):
+        check_dates(None, "2025-06-01", 0)
+
+    with pytest.raises(ValueError, match=re.escape("Period must be greater than 0.")):
+        check_dates(None, "2025-06-01", -1)
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("Start date 2025-06-01 must not be after end date 2025-01-01."),
+    ):
+        check_dates("2025-06-01", "2025-01-01", None)
+
+    # Valid: start provided without period
+    check_dates("2025-01-01", None, None)
+
+    # Valid: period provided without start
+    check_dates(None, "2025-06-01", 3)
+
+    # Valid: both start and period provided, start <= end
+    check_dates("2025-01-01", "2025-06-01", 3)
+
+
+def test_get_dates(monkeypatch: pytest.MonkeyPatch):
+    """Test get_dates function.
+
+    We test:
+    (1) When end is None, today's date is used.
+    (2) When start is None, it is calculated as end - period months.
+    (3) When both are provided, they are returned as-is.
+    """
+    mock_run = MagicMock()
+    monkeypatch.setattr("pipeline.run", mock_run)
+
+    mock_datetime = MagicMock()
+    mock_datetime.now.return_value.strftime.return_value = "2025-06-01"
+    mock_datetime.strptime = datetime.strptime
+    monkeypatch.setattr("pipeline.datetime", mock_datetime)
+
+    # When end is None, today's date is used
+    start, end = get_dates("2025-01-01", None, None)
+    assert end == "2025-06-01"
+    assert start == "2025-01-01"
+
+    # When start is None, it is calculated as end - period months
+    start, end = get_dates(None, "2025-06-01", 3)
+    assert start == "2025-03-01"
+    assert end == "2025-06-01"
+
+    # When only period is provided, end defaults to today and start is calculated
+    start, end = get_dates(None, None, 3)
+    assert end == "2025-06-01"
+    assert start == "2025-03-01"
+
+    # When both are provided, they are returned as-is
+    start, end = get_dates("2025-01-01", "2025-06-01", None)
+    assert start == "2025-01-01"
+    assert end == "2025-06-01"

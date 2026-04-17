@@ -8,6 +8,7 @@ from pathlib import Path
 
 import polars as pl
 import requests
+from dateutil import relativedelta
 from openhexa.sdk import DHIS2Connection, current_run, parameter, pipeline, workspace
 from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
@@ -106,14 +107,21 @@ run = current_run or LocalRun()
     code="start_date",
     type=str,
     name="Start date (YYYY-MM-DD)",
-    help="Start date for the extraction",
-    default="2020-01-01",
+    help="Start date for the extraction.If not provided,it will be calculated as end_date - period",
+    required=False,
 )
 @parameter(
     code="end_date",
     type=str,
     name="End date (YYYY-MM-DD)",
-    help="End date for the extraction (today by default)",
+    help="End date for the extraction (today by default).",
+    required=False,
+)
+@parameter(
+    code="period",
+    type=int,
+    name="Number of months to extract",
+    help="It will only be used if start date is not provided.",
     required=False,
 )
 @parameter(
@@ -139,13 +147,14 @@ run = current_run or LocalRun()
 )
 def dhis2_extract_data_elements(
     src_dhis2: DHIS2Connection,
-    start_date: str,
+    start_date: str | None = None,
     data_elements: list[str] | None = None,
     data_element_groups: list[str] | None = None,
     organisation_units: list[str] | None = None,
     organisation_unit_groups: list[str] | None = None,
     include_children: bool = False,
     end_date: str | None = None,
+    period: int | None = None,
     dst_file: str | None = None,
     dst_dataset: Dataset | None = None,
     dst_table: str | None = None,
@@ -161,8 +170,8 @@ def dhis2_extract_data_elements(
     if not organisation_unit_groups:
         organisation_unit_groups = None
 
-    if not end_date:
-        end_date = datetime.now().strftime("%Y-%m-%d")
+    check_dates(start_date, end_date, period)
+    start_date, end_date = get_dates(start_date, end_date, period)
 
     params = RequestParams(
         data_elements=data_elements,
@@ -482,6 +491,66 @@ def write_to_database(df: pl.DataFrame, table_name: str) -> None:
         if_table_exists="replace",
     )
     run.log_info(f"Data written to DB table {table_name}")
+
+
+def get_dates(start: str | None, end: str | None, period: int | None) -> tuple[str, str]:
+    """Resolve start and end dates, applying defaults where needed.
+
+    Args:
+        start: Start date string in ISO format (YYYY-MM-DD), or None.
+        end: End date string in ISO format (YYYY-MM-DD), or None.
+        period: Number of months to extract, or None.
+
+    Returns:
+        tuple[str, str]: Resolved start and end dates as ISO format strings.
+    """
+    if end is None:
+        end = datetime.now().strftime("%Y-%m-%d")
+        run.log_info(f"End date not provided, using {end}")
+    if start is None:
+        start = (
+            datetime.strptime(end, "%Y-%m-%d") - relativedelta.relativedelta(months=period)
+        ).strftime("%Y-%m-%d")
+        run.log_info(f"Start date not provided, using {start}")
+    return start, end
+
+
+def check_dates(start: str | None, end: str | None, period: int | None):
+    """Check that sufficient date parameters are provided for extraction.
+
+    Args:
+        start: Start date string in ISO format (YYYY-MM-DD), or None.
+        end: End date string in ISO format (YYYY-MM-DD), or None.
+        period: Number of months to extract, or None.
+
+    Raises:
+        ValueError: If neither start nor period is provided, or if start is after end.
+    """
+    if start is None and period is None:
+        msg = "Either start date or period must be provided."
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    if period is not None and period <= 0:
+        msg = "Period must be greater than 0."
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    if start is not None and not is_iso_date(start):
+        msg = f"Start date '{start}' is not in ISO format (YYYY-MM-DD)"
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    if end is not None and not is_iso_date(end):
+        msg = f"End date '{end}' is not in ISO format (YYYY-MM-DD)"
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    if start is not None and end is not None:
+        if start > end:
+            msg = f"Start date {start} must not be after end date {end}."
+            run.log_error(msg)
+            raise ValueError(msg)
 
 
 def default_output_path() -> Path:
