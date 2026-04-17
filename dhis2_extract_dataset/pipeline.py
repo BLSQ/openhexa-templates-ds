@@ -70,18 +70,26 @@ run = current_run or LocalRun()
 @parameter(
     "start",
     name="Start Date (ISO format)",
-    help="ISO format: yyyy-mm-dd",
+    help="Start date for the extraction (ISO format: yyyy-mm-dd)."
+    " If not provided, it will be calculated as end_date - period.",
     type=str,
-    required=True,
+    required=False,
     # default="2025-05-17",
 )
 @parameter(
     "end",
     name="End Date (ISO format)",
-    help="ISO format: yyyy-mm-dd. Today by default",
+    help="End date for the extraction (ISO format: yyyy-mm-dd). If not provided, it will be today.",
     type=str,
     required=False,
     # default="2025-05-18",
+)
+@parameter(
+    "period",
+    name="Number of months to extract",
+    help="It will only be used if start date is not provided.",
+    type=int,
+    required=False,
 )
 @parameter(
     code="dst_dataset",
@@ -143,8 +151,9 @@ def dhis2_extract_dataset(
     ou_group_ids: list[str],
     ou_ids: list[str],
     include_children: bool,
-    start: str,
+    start: str | None,
     end: str | None,
+    period: int | None = None,
     max_nb_ou_extracted: int = 5,
 ):
     """Write your pipeline orchestration here.
@@ -153,14 +162,14 @@ def dhis2_extract_dataset(
     computations.
     """
     dhis = get_dhis(dhis_con, max_nb_ou_extracted)
-    start = valid_date(start)
-    end = valid_date(end)
+    check_dates(start, end, period)
+    start_date, end_date = get_dates(start, end, period)
     dhis2_name = get_dhis2_name_domain(dhis_con)
     all_ds = get_datasets(dhis)
     ds = all_ds.filter(pl.col("id") == dataset_id)
     validate_ous_parameters(ou_ids, ou_group_ids)
-    start_api = isodate_to_period_type(start, ds["period_type"].item())
-    end_api = isodate_to_period_type(end, ds["period_type"].item())
+    start_api = isodate_to_period_type(start_date, ds["period_type"].item())
+    end_api = isodate_to_period_type(end_date, ds["period_type"].item())
     pyramid = get_organisation_units(dhis)
     des = get_data_elements(dhis)
     cocs = get_category_option_combos(dhis)
@@ -195,6 +204,34 @@ def dhis2_extract_dataset(
         write_to_db(data_values, dst_table)
 
 
+def get_dates(start: str | None, end: str | None, period: int | None) -> tuple[str, str]:
+    """Get start and end dates for the extraction, validating the input and applying defaults.
+
+    Args:
+        start (str | None): Start date string in ISO format, or None.
+        end (str | None): End date string in ISO format, or None.
+        period (int | None): Number of months to extract, or None.
+
+    Returns:
+        tuple[str, str]: Start and end dates as ISO format strings.
+    """
+    if end is None:
+        end = date.today().isoformat()
+        run.log_info(f"End date not provided, using today's date {end}")
+    else:
+        end = valid_date(end)
+
+    if start is None:
+        start = (
+            datetime.strptime(end, "%Y-%m-%d") - relativedelta.relativedelta(months=period)
+        ).strftime("%Y-%m-%d")
+        run.log_info(f"Start date not provided, using {start}")
+    else:
+        start = valid_date(start)
+
+    return start, end
+
+
 def add_ds_information(
     data_values: pl.DataFrame,
     ds: pl.DataFrame,
@@ -225,6 +262,29 @@ def add_ds_information(
         )
 
     return data_values
+
+
+def check_dates(start: str | None, end: str | None, period: int | None):
+    """Check that sufficient date parameters are provided for extraction.
+
+    Args:
+        start (str | None): Start date string in ISO format, or None.
+        end (str | None): End date string in ISO format, or None.
+        period (int | None): Number of months to extract, or None.
+    """
+    if start is None and period is None:
+        run.log_error("Either start date or period must be provided.")
+        raise ValueError("Either start date or period must be provided.")
+
+    if period is not None and period <= 0:
+        msg = "Period must be greater than 0."
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    if start is not None and end is not None:
+        if start > end:
+            run.log_error(f"Start date {start} must not be after end date {end}.")
+            raise ValueError(f"Start date {start} must not be after end date {end}.")
 
 
 def validate_ous_parameters(ous: list[str], groups: list[str]):
@@ -425,7 +485,7 @@ def warning_request(dataset_id: str, datasets: dict, selected_ou_ids: set) -> se
     return dataset_ous_intersection
 
 
-def valid_date(date_str: str | None) -> str:
+def valid_date(date_str: str) -> str:
     """Validates a date string and returns it if valid, otherwise logs an error.
 
     Args:
@@ -435,8 +495,6 @@ def valid_date(date_str: str | None) -> str:
         str: The validated date string.
 
     """
-    if date_str is None:
-        return date.today().isoformat()
     if is_iso_date(date_str):
         return date_str
     run.log_error(f"Invalid date format: {date_str}. Expected ISO format (yyyy-mm-dd).")

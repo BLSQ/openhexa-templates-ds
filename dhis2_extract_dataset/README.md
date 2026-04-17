@@ -19,8 +19,9 @@ Outputs, including logs specifying warnings for missing data elements and period
 |----------------------|-----------------|--------|-------|-------------|
 | DHIS2 Connection     | DHIS2Connection | Yes    | -     | Connection to DHIS2 instance |
 | INPUT: DHIS2 dataset | str             | Yes    | -     | DHIS2 dataset ID to extract |
-| Start Date (ISO format) | str  | Yes    | -     | Start date for extraction |
-| End Date (ISO format) | str  | No    | Today  | End date for extraction |
+| Start Date (ISO format) | str  | No    | -     | Start date for extraction. If not provided, it will be calculated as end date - period. |
+| End Date (ISO format) | str  | No    | Today  | End date for extraction. |
+| Number of months to extract | int | No | - | If no start date is provided, the start date will be calculated as the end date minus this number of months. |
 | Output dataset | Dataset | No | - | OpenHEXA dataset. A new version will be created if new content is detected |
 | Output DB table | String | No | - | Database table name for storing the extracted data |
 | Name your extraction | String | No | Auto-generated | Custom output file path in workspace |
@@ -107,7 +108,7 @@ If the validation fails, the pipeline raises an error and stops execution.
 flowchart TD
     A[Connect to DHIS2]
     A --> B[Validate parameters]
-    B --> B1[Validate and transform date parameters]
+    B --> B1[Validate and resolve date parameters]
     B --> B2[Validate orgunit parameters]
     B1 --> C[Fetch metadata]
     B2 --> C
