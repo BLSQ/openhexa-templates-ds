@@ -13,7 +13,6 @@ from openhexa.sdk.pipelines.parameter import DHIS2Widget
 from openhexa.sdk.workspaces.connection import DHIS2Connection
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import (
-    extract_dataset,
     get_category_option_combos,
     get_data_elements,
     get_datasets,
@@ -22,6 +21,7 @@ from openhexa.toolbox.dhis2.dataframe import (
 )
 from openhexa.toolbox.dhis2.periods import Period, period_from_string
 from sqlalchemy import create_engine
+from utils import extract_dataset
 from validate import validate_data
 
 logger = logging.getLogger(__name__)
@@ -177,6 +177,7 @@ def dhis2_extract_dataset(
         ou_group_ids,
         include_children,
     )
+    data_values = drop_null_values_with_comment(data_values)
     data_values = join_object_names(
         df=data_values,
         data_elements=des,
@@ -195,6 +196,23 @@ def dhis2_extract_dataset(
 
     if dst_table:
         write_to_db(data_values, dst_table)
+
+
+def drop_null_values_with_comment(df: pl.DataFrame) -> pl.DataFrame:
+    """Drop rows where value is null and a comment is present.
+
+    Args:
+        df: DataFrame with 'value' and 'comment' columns.
+
+    Returns:
+        pl.DataFrame: DataFrame with unexplained null values removed.
+    """
+    before = df.height
+    df = df.filter(~(pl.col("value").is_null() & pl.col("comment").is_not_null())).drop("comment")
+    dropped = before - df.height
+    if dropped > 0:
+        run.log_info(f"Dropped {dropped} rows with null value and a comment")
+    return df
 
 
 def add_ds_information(
