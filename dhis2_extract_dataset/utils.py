@@ -40,8 +40,8 @@ def extract_dataset(
     start_date: datetime | None = None,
     end_date: datetime | None = None,
     periods: list[str] | None = None,
-    org_units: list[str] = None,
-    org_unit_groups: list[str] = None,
+    org_units: list[str] | None = None,
+    org_unit_groups: list[str] | None = None,
     include_children: bool = False,
     last_updated: datetime | None = None,
 ) -> pl.DataFrame:
@@ -49,6 +49,20 @@ def extract_dataset(
 
     Same as openhexa.toolbox.dhis2.dataframe.extract_dataset but also returns the
     comment column (null when no comment is set on a data value).
+
+    Returns
+    -------
+    pl.DataFrame
+        A dataframe with the following columns:
+        - data_element_id: str
+        - period: str
+        - organisation_unit_id: str
+        - category_option_combo_id: str
+        - attribute_option_combo_id: str
+        - value: str
+        - comment: str (null when no comment is set on a data value)
+        - created: datetime
+        - last_updated: datetime
     """
     if org_units is None and org_unit_groups is None:
         msg = "org_units or org_unit_groups must be provided"
