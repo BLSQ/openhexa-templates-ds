@@ -198,17 +198,22 @@ def dhis2_extract_dataset(
         write_to_db(data_values, dst_table)
 
 
-def drop_null_values_with_comment(df: pl.DataFrame) -> pl.DataFrame:
+def drop_null_values_with_comment(df: pl.DataFrame, drop_comment_col: bool = True) -> pl.DataFrame:
     """Drop rows where value is null and a comment is present.
+
+    Drop the comment column afterwards if specified.
 
     Args:
         df: DataFrame with 'value' and 'comment' columns.
+        drop_comment_col: Whether to drop the 'comment' column after filtering, defaults to True.
 
     Returns:
         pl.DataFrame: DataFrame with unexplained null values removed.
     """
     before = df.height
-    df = df.filter(~(pl.col("value").is_null() & pl.col("comment").is_not_null())).drop("comment")
+    df = df.filter(~(pl.col("value").is_null() & pl.col("comment").is_not_null()))
+    if drop_comment_col:
+        df = df.drop("comment")
     dropped = before - df.height
     if dropped > 0:
         run.log_info(f"Dropped {dropped} rows with null value and a comment")
@@ -223,7 +228,7 @@ def add_ds_information(
 
     Args:
         data_values (pl.DataFrame): The extracted data values.
-        ds (pl.Dataframe): Dataframe containing the dataset information.
+        ds (pl.DataFrame): Dataframe containing the dataset information.
 
 
     Returns:
