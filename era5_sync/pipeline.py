@@ -9,10 +9,11 @@ from pathlib import Path
 
 import geopandas as gpd
 import xarray as xr
+from dateutil.relativedelta import relativedelta
 from openhexa.sdk import CustomConnection, current_run, parameter, pipeline, workspace
 from openhexa.toolbox.era5.cache import Cache
 from openhexa.toolbox.era5.extract import (
-    Client,
+    Client,  # type: ignore
     grib_to_zarr,
     prepare_requests,
     retrieve_requests,
@@ -37,14 +38,14 @@ logging.getLogger("openhexa.toolbox.era5").setLevel(logging.INFO)
     code="start_date",
     type=str,
     name="Start date",
-    help="Start date of extraction period",
-    default="2020-01-01",
+    help="Start date of extraction period (defaults to 3 months ago)",
+    required=False,
 )
 @parameter(
     code="end_date",
     type=str,
     name="End date",
-    help="End date of extraction period (latest available by default)",
+    help="End date of extraction period (defaults to today's date)",
     required=False,
 )
 @parameter(
@@ -90,7 +91,7 @@ logging.getLogger("openhexa.toolbox.era5").setLevel(logging.INFO)
     default="pipelines/era5_sync/data",
 )
 def era5_sync(
-    start_date: str,
+    start_date: str | None,
     cds_connection: CustomConnection,
     boundaries_file: str,
     boundaries_id_col: str,
@@ -156,7 +157,7 @@ def era5_sync(
 @era5_sync.task
 def sync_variables(
     client: Client,
-    start_date: str,
+    start_date: str | None,
     boundaries_file: Path,
     variables: Sequence[str],
     output_dir: Path,
@@ -178,11 +179,12 @@ def sync_variables(
         True when task is complete.
 
     """
-    start_date_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
-    if end_date:
-        end_date_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
-    else:
-        end_date_dt = datetime.now().date()
+    start_date_dt, end_date_dt = _process_periods(
+        client=client,
+        dataset_id="reanalysis-era5-land",
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     boundaries = _read_boundaries(boundaries_file)
     area = _get_area_from_boundaries(boundaries)
@@ -507,3 +509,87 @@ def _process_wind_speed(
     _process_sampled_variable(
         dataset=ds_wind_speed, masks=masks, periods=periods, output_dir=output_dir
     )
+
+
+def _process_periods(
+    client: Client, dataset_id: str, start_date: str | None, end_date: str | None
+) -> tuple[date, date]:
+    """Resolve the extraction period against collection availability.
+
+    When no dates are provided, the extraction defaults to the last 3 months up to
+    today's date, bounded to the collection availability window.
+
+    Args:
+        client: CDS API client.
+        dataset_id: ID of the dataset to extract data from.
+        start_date: Start date of the extraction period (YYYY-MM-DD).
+        end_date: End date of the extraction period (YYYY-MM-DD).
+
+    Returns:
+        The effective start and end dates to extract.
+    """
+    collection = client.get_collection(dataset_id)
+    if not collection.begin_datetime or not collection.end_datetime:
+        msg = f"Dataset {dataset_id} does not have a defined date range"
+        raise ValueError(msg)
+
+    collection_start = collection.begin_datetime.date()
+    collection_end = collection.end_datetime.date()
+    today = datetime.now().date()
+
+    requested_start = (
+        _parse_cutoff_date(start_date, field_name="start_date")
+        if start_date
+        else today - relativedelta(months=3)
+    )
+    requested_end = _parse_cutoff_date(end_date, field_name="end_date") if end_date else today
+
+    if start_date:
+        current_run.log_info(f"Requested extraction start date: {requested_start.isoformat()}.")
+    else:
+        current_run.log_info(
+            "No start date provided. Defaulting to the last 3 months: "
+            f"{requested_start.isoformat()}."
+        )
+
+    if end_date:
+        current_run.log_info(f"Requested extraction end date: {requested_end.isoformat()}.")
+    else:
+        current_run.log_info(
+            f"No end date provided. Defaulting to today's date: {requested_end.isoformat()}."
+        )
+
+    if requested_start > requested_end:
+        msg = (
+            f"Invalid extraction period: start date {requested_start.isoformat()} is after "
+            f"end date {requested_end.isoformat()}."
+        )
+        raise ValueError(msg)
+
+    effective_start = max(requested_start, collection_start)
+    effective_end = min(requested_end, collection_end)
+
+    current_run.log_info(
+        f"Effective extraction period: {effective_start.isoformat()} "
+        f"to {effective_end.isoformat()}."
+    )
+
+    return effective_start, effective_end
+
+
+def _parse_cutoff_date(date_str: str, field_name: str = "date") -> date:
+    """Parse a YYYY-MM-DD date string and return a date object.
+
+    Args:
+        date_str: The date string to parse.
+        field_name: Name of the field being parsed, used in error messages.
+
+    Returns:
+        A date object representing the parsed date.
+    """
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except (ValueError, TypeError) as e:
+        msg = f"Invalid {field_name} '{date_str}'. Expected format: YYYY-MM-DD."
+        current_run.log_error(f"{msg} Parsing error: {e!s}")
+        raise ValueError(msg) from e

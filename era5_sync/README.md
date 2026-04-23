@@ -39,8 +39,8 @@ To load data outputs into a DHIS2 instance, use the [ERA5 Load DHIS2](../era5_lo
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| Start date | String | Yes | `2020-01-01` | Start date of extraction period (YYYY-MM-DD) |
-| End date | String | No | Today | End date of extraction period (YYYY-MM-DD) |
+| Start date | String | No | 3 months before run date | Start date of extraction period (YYYY-MM-DD) |
+| End date | String | No | Run date | End date of extraction period (YYYY-MM-DD) |
 | Climate data store | Custom Connection | Yes | - | CDS API credentials (with 'url' and 'api_key') |
 | Variables | List of String | Yes | `2m_dewpoint_temperature`<br>`2m_temperature`<br>`total_precipitation` | ERA5-Land variables to sync |
 | Path to boundaries file | String | Yes | - | Path to the boundaries file (GeoJSON, GPKG, or Parquet) |
@@ -210,7 +210,16 @@ flowchart TD
 
 ## Notes
 
-The pipeline is designed for incremental updates. On the first run, all data from `start_date` to `end_date` is downloaded. On subsequent runs, only data for new dates (not in the Zarr store) is downloaded.
+The pipeline is designed for incremental updates. On the first run, all data from the effective extraction period is downloaded. On subsequent runs, only data for missing dates (not already present in the Zarr store) is requested.
+
+If no `start_date` is provided, the pipeline defaults to the last 3 months. If no `end_date` is provided, it defaults to the run date.
+
+The requested extraction period is automatically adjusted to the actual availability window of the CDS collection. During the run, logs report:
+- the collection availability period
+- the requested extraction period
+- the effective extraction period after bounding to available data
+
+If the requested period falls completely outside the collection availability window, the pipeline fails with an explicit error.
 
 The CDS API has rate limits and queue times that vary based on demand. Large data requests are automatically chunked by the pipeline to avoid overloading the server, but in some cases, large data requests might be rejected by the CDS. In such cases, consider reducing the data extraction period (especially for 1st runs).
 
