@@ -235,6 +235,18 @@ pyramid = pl.DataFrame(
 dataset_ous_in = {"organisationUnits": [{"id": "ou1"}, {"id": "ou2"}, {"id": "ou3"}]}
 dataset_ous_out = ["ou1", "ou2", "ou3"]
 
+df_with_nulls = pl.DataFrame(
+    {
+        "value": ["10", None, None, "40"],
+        "comment": [None, "missing data", None, "ok"],
+    }
+)
+df_after_drop_nulls_with_comment = pl.DataFrame(
+    {
+        "value": ["10", None, "40"],
+    }
+)
+
 
 date_str = "2023-03-15"
 

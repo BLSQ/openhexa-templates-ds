@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pipeline import (
     add_ds_information,
+    drop_null_values_with_comment,
     get_dataelements_with_no_data,
     get_descendants,
     get_periods_with_no_data,
@@ -191,6 +192,25 @@ def test_isodate_to_period_type():
 
     with pytest.raises(ValueError, match="Unsupported DHIS2 period type: UnsupportedType"):
         isodate_to_period_type(config.date_str, "UnsupportedType")
+
+
+def test_drop_null_values_with_comment(monkeypatch: pytest.MonkeyPatch):
+    """Test drop_null_values_with_comment function.
+
+    We test:
+    (1) Rows with null value and a comment are dropped.
+    (2) Rows with null value and no comment are kept.
+    (3) Rows with a non-null value are kept regardless of comment.
+    (4) The drop count is logged when rows are removed.
+    """
+    mock_run = MagicMock()
+    monkeypatch.setattr("pipeline.run", mock_run)
+
+    result = drop_null_values_with_comment(config.df_with_nulls)
+
+    assert isinstance(result, pl.DataFrame)
+    assert result.equals(config.df_after_drop_nulls_with_comment)
+    mock_run.log_info.assert_called_once_with("Dropped 1 rows with null value and a comment")
 
 
 def test_set_date_range_delta():
