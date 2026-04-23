@@ -544,20 +544,21 @@ def _process_periods(
     )
     requested_end = _parse_cutoff_date(end_date, field_name="end_date") if end_date else today
 
-    if start_date:
-        current_run.log_info(f"Requested extraction start date: {requested_start.isoformat()}.")
-    else:
-        current_run.log_info(
-            "No start date provided. Defaulting to the last 3 months: "
-            f"{requested_start.isoformat()}."
-        )
+    if current_run:
+        if start_date:
+            current_run.log_info(f"Requested extraction start date: {requested_start.isoformat()}.")
+        else:
+            current_run.log_info(
+                "No start date provided. Defaulting to the last 3 months: "
+                f"{requested_start.isoformat()}."
+            )
 
-    if end_date:
-        current_run.log_info(f"Requested extraction end date: {requested_end.isoformat()}.")
-    else:
-        current_run.log_info(
-            f"No end date provided. Defaulting to today's date: {requested_end.isoformat()}."
-        )
+        if end_date:
+            current_run.log_info(f"Requested extraction end date: {requested_end.isoformat()}.")
+        else:
+            current_run.log_info(
+                f"No end date provided. Defaulting to today's date: {requested_end.isoformat()}."
+            )
 
     if requested_start > requested_end:
         msg = (
@@ -569,10 +570,11 @@ def _process_periods(
     effective_start = max(requested_start, collection_start)
     effective_end = min(requested_end, collection_end)
 
-    current_run.log_info(
-        f"Effective extraction period: {effective_start.isoformat()} "
-        f"to {effective_end.isoformat()}."
-    )
+    if current_run:
+        current_run.log_info(
+            f"Effective extraction period: {effective_start.isoformat()} "
+            f"to {effective_end.isoformat()}."
+        )
 
     return effective_start, effective_end
 
@@ -591,5 +593,6 @@ def _parse_cutoff_date(date_str: str, field_name: str = "date") -> date:
         return datetime.strptime(date_str, "%Y-%m-%d").date()
     except (ValueError, TypeError) as e:
         msg = f"Invalid {field_name} '{date_str}'. Expected format: YYYY-MM-DD."
-        current_run.log_error(f"{msg} Parsing error: {e!s}")
+        if current_run:
+            current_run.log_error(f"{msg} Parsing error: {e!s}")
         raise ValueError(msg) from e
