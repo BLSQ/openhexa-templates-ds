@@ -176,7 +176,7 @@ cython_debug/
 # OpenHEXA stuff
 workspace.yaml
 workspace/
-
+*param*
 # Misc
 .DS_Store
 .vscode
