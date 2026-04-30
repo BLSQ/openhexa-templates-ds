@@ -33,6 +33,29 @@ logging.basicConfig(level=logging.WARNING)
 logging.getLogger("openhexa.toolbox.era5").setLevel(logging.INFO)
 
 
+class LocalRun:
+    """Mock current_run for local executions."""
+
+    def log_info(self, msg: str) -> None:
+        """Mock current_run.log_info()."""
+        logger.info(msg)
+
+    def log_warning(self, msg: str) -> None:
+        """Mock current_run.log_warning()."""
+        logger.warning(msg)
+
+    def log_error(self, msg: str) -> None:
+        """Mock current_run.log_error()."""
+        logger.error(msg)
+
+    def add_file_output(self, fp: str) -> None:
+        """Mock current_run.add_file_output()."""
+        logger.info(f"File output added: {fp}")
+
+
+run = current_run or LocalRun()
+
+
 @pipeline("era5_sync")
 @parameter(
     code="start_date",
@@ -192,8 +215,7 @@ def sync_variables(
     metadata = get_variables()
 
     for variable in variables:
-        if current_run:
-            current_run.log_info(f"Syncing variable '{variable}'")
+        run.log_info(f"Syncing variable '{variable}'")
 
         zarr_store = output_dir / f"{variable}.zarr"
         zarr_store.parent.mkdir(parents=True, exist_ok=True)
@@ -211,8 +233,7 @@ def sync_variables(
             cache=cache,
         )
 
-        if current_run:
-            current_run.log_info(f"Variable '{variable}' synced successfully.")
+        run.log_info(f"Variable '{variable}' synced successfully.")
 
     return True
 
@@ -250,10 +271,7 @@ def _sync_variable(
             area=list(area),
             zarr_store=zarr_store,
         )
-        if current_run:
-            current_run.log_info(
-                f"Prepared {len(requests)} data requests for variable '{variable}'"
-            )
+        run.log_info(f"Prepared {len(requests)} data requests for variable '{variable}'")
         retrieve_requests(
             client=client,
             dataset_id="reanalysis-era5-land",
@@ -261,8 +279,7 @@ def _sync_variable(
             dst_dir=raw_dir,
             cache=cache,
         )
-        if current_run:
-            current_run.log_info(f"Retrieved data for variable '{variable}'")
+        run.log_info(f"Retrieved data for variable '{variable}'")
         grib_to_zarr(src_dir=raw_dir, zarr_store=zarr_store, data_var=data_var)
 
 
@@ -335,8 +352,7 @@ def process_variables(
 
         ds = xr.open_zarr(zarr_store, consolidated=True, decode_timedelta=False)
         var_meta = metadata[var_name]
-        if current_run:
-            current_run.log_info(f"Processing variable '{var_name}'")
+        run.log_info(f"Processing variable '{var_name}'")
 
         # Process accumulated variables (total precipitation, runoff...)
         if var_meta["accumulated"]:
@@ -349,14 +365,12 @@ def process_variables(
                 dataset=ds, masks=masks, periods=periods, output_dir=output_dir
             )
 
-        if current_run:
-            current_run.log_info(f"Variable '{var_name}' processed successfully")
+        run.log_info(f"Variable '{var_name}' processed successfully")
 
     # Calculate relative humidity if both t2m and d2m are available
     available_vars = [zarr_store.stem for zarr_store in zarr_stores]
     if "2m_temperature" in available_vars and "2m_dewpoint_temperature" in available_vars:
-        if current_run:
-            current_run.log_info("Calculating relative humidity")
+        run.log_info("Calculating relative humidity")
         zarr_store_t2m = src_dir / "2m_temperature.zarr"
         zarr_store_d2m = src_dir / "2m_dewpoint_temperature.zarr"
         _process_relative_humidity(
@@ -366,13 +380,11 @@ def process_variables(
             periods=periods,
             output_dir=output_dir,
         )
-        if current_run:
-            current_run.log_info("Relative humidity calculated successfully")
+        run.log_info("Relative humidity calculated successfully")
 
     # Calculate wind speed if both u10 and v10 are available
     if "10m_u_component_of_wind" in available_vars and "10m_v_component_of_wind" in available_vars:
-        if current_run:
-            current_run.log_info("Calculating wind speed")
+        run.log_info("Calculating wind speed")
         zarr_store_u10 = src_dir / "10m_u_component_of_wind.zarr"
         zarr_store_v10 = src_dir / "10m_v_component_of_wind.zarr"
         _process_wind_speed(
@@ -382,8 +394,7 @@ def process_variables(
             periods=periods,
             output_dir=output_dir,
         )
-        if current_run:
-            current_run.log_info("Wind speed calculated successfully")
+        run.log_info("Wind speed calculated successfully")
 
     return True
 
@@ -544,21 +555,20 @@ def _process_periods(
     )
     requested_end = _parse_cutoff_date(end_date, field_name="end_date") if end_date else today
 
-    if current_run:
-        if start_date:
-            current_run.log_info(f"Requested extraction start date: {requested_start.isoformat()}.")
-        else:
-            current_run.log_info(
-                "No start date provided. Defaulting to the last 3 months: "
-                f"{requested_start.isoformat()}."
-            )
+    if start_date:
+        run.log_info(f"Requested extraction start date: {requested_start.isoformat()}.")
+    else:
+        run.log_info(
+            "No start date provided. Defaulting to the last 3 months: "
+            f"{requested_start.isoformat()}."
+        )
 
-        if end_date:
-            current_run.log_info(f"Requested extraction end date: {requested_end.isoformat()}.")
-        else:
-            current_run.log_info(
-                f"No end date provided. Defaulting to today's date: {requested_end.isoformat()}."
-            )
+    if end_date:
+        run.log_info(f"Requested extraction end date: {requested_end.isoformat()}.")
+    else:
+        run.log_info(
+            f"No end date provided. Defaulting to today's date: {requested_end.isoformat()}."
+        )
 
     if requested_start > requested_end:
         msg = (
@@ -570,11 +580,10 @@ def _process_periods(
     effective_start = max(requested_start, collection_start)
     effective_end = min(requested_end, collection_end)
 
-    if current_run:
-        current_run.log_info(
-            f"Effective extraction period: {effective_start.isoformat()} "
-            f"to {effective_end.isoformat()}."
-        )
+    run.log_info(
+        f"Effective extraction period: {effective_start.isoformat()} "
+        f"to {effective_end.isoformat()}."
+    )
 
     return effective_start, effective_end
 
@@ -590,9 +599,8 @@ def _parse_cutoff_date(date_str: str, field_name: str = "date") -> date:
         A date object representing the parsed date.
     """
     try:
-        return datetime.strptime(date_str, "%Y-%m-%d").date()
+        return date.fromisoformat(date_str)
     except (ValueError, TypeError) as e:
         msg = f"Invalid {field_name} '{date_str}'. Expected format: YYYY-MM-DD."
-        if current_run:
-            current_run.log_error(f"{msg} Parsing error: {e!s}")
+        run.log_error(f"{msg} Parsing error: {e!s}")
         raise ValueError(msg) from e
