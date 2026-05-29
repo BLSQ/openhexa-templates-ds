@@ -119,7 +119,9 @@ def iaso_extract_submissions(
     form_name = get_form_name(iaso, form_id)
     cutoff_date = parse_cutoff_date(last_updated)
 
-    submissions = fetch_submissions(iaso, form_id, ou_parent_id, cutoff_date)
+    submissions = fetch_submissions(
+        iaso=iaso, form_id=form_id, ou_parent_id=ou_parent_id, cutoff_date=cutoff_date
+    )
     submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
     submissions = deduplicate_columns(submissions)
 
