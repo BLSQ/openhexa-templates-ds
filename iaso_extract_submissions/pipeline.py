@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+from unittest.mock import patch
 
 import polars as pl
 from openhexa.sdk import (
@@ -18,6 +21,22 @@ from openhexa.sdk.datasets.dataset import Dataset
 from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO, dataframe
 from utils import clean_string, in_dataset_version
+
+
+@contextmanager
+def _force_string_csv_inference() -> Iterator[None]:
+    # Workaround for openhexa.toolbox extract_submissions: pl.read_csv is called
+    # without infer_schema_length, so a column with a mix of int-looking and
+    # float-looking values (e.g. 37 vs 37.5) raises during CSV parsing. We force
+    # full-scan inference; final dtypes are reapplied later from form metadata.
+    original = pl.read_csv
+
+    def patched(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        kwargs.setdefault("infer_schema_length", None)
+        return original(*args, **kwargs)
+
+    with patch("polars.read_csv", patched):
+        yield
 
 
 @pipeline("iaso_extract_submissions")
@@ -218,9 +237,10 @@ def fetch_submissions(
     """
     try:
         current_run.log_info(f"Fetching submissions for form ID {form_id}")
-        return dataframe.extract_submissions(
-            iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=ou_parent_id
-        )
+        with _force_string_csv_inference():
+            return dataframe.extract_submissions(
+                iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=ou_parent_id
+            )
     except Exception as exc:
         current_run.log_error(f"Submission retrieval failed: {exc}")
         raise
