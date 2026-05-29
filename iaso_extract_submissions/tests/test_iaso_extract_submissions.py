@@ -209,11 +209,11 @@ def test_parse_cutoff_date_invalid_format(input_date: str):
 # -------------------------------------------------------------------
 
 
-def test_fetch_submissions_success():
+def test_fetch_submissions_success_with_single_parent():
     """Should log info and return DataFrame when extraction succeeds."""
     iaso = MagicMock()
     form_id = 123
-    ou_parent_id = 456
+    ou_parent_ids = [456]
     cutoff_date = "2024-01-01"
 
     expected_df = pl.DataFrame(
@@ -232,7 +232,7 @@ def test_fetch_submissions_success():
         result = fetch_submissions(
             iaso=iaso,
             form_id=form_id,
-            ou_parent_id=ou_parent_id,
+            ou_parent_ids=ou_parent_ids,
             cutoff_date=cutoff_date,
         )
 
@@ -242,11 +242,40 @@ def test_fetch_submissions_success():
         mock_current_run.log_error.assert_not_called()
 
         mock_extract.assert_called_once_with(
-            iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=ou_parent_id
+            iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=456
         )
 
         assert isinstance(result, pl.DataFrame)
         assert result.to_dicts() == expected_df.to_dicts()
+
+
+def test_fetch_submissions_with_multiple_parents_deduplicates():
+    """Multiple parent IDs trigger one toolbox call each; results are deduplicated."""
+    iaso = MagicMock()
+    form_id = 321
+    ou_parent_ids = [10, 20]
+
+    with (
+        patch("pipeline.dataframe.extract_submissions") as mock_extract,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
+        mock_extract.side_effect = [
+            pl.DataFrame({"id": [1, 2], "value": ["a", "b"]}),
+            pl.DataFrame({"id": [2, 3], "value": ["b", "c"]}),
+        ]
+
+        result = fetch_submissions(
+            iaso=iaso,
+            form_id=form_id,
+            ou_parent_ids=ou_parent_ids,
+            cutoff_date=None,
+        )
+
+        assert mock_extract.call_count == 2
+        mock_extract.assert_any_call(iaso=iaso, form_id=form_id, last_updated=None, ou_parent_id=10)
+        mock_extract.assert_any_call(iaso=iaso, form_id=form_id, last_updated=None, ou_parent_id=20)
+        assert sorted(result["id"].to_list()) == [1, 2, 3]
+        mock_current_run.log_error.assert_not_called()
 
 
 def test_fetch_submissions_success_without_cutoff_date():
@@ -265,7 +294,7 @@ def test_fetch_submissions_success_without_cutoff_date():
         result = fetch_submissions(
             iaso=iaso,
             form_id=form_id,
-            ou_parent_id=None,
+            ou_parent_ids=None,
             cutoff_date=None,
         )
 
@@ -281,7 +310,6 @@ def test_fetch_submissions_failure():
     """Should log error and re-raise exception when extraction fails."""
     iaso = MagicMock()
     form_id = 999
-    ou_parent_id = None
     cutoff_date = "2024-01-01"
 
     with (
@@ -294,7 +322,7 @@ def test_fetch_submissions_failure():
             fetch_submissions(
                 iaso=iaso,
                 form_id=form_id,
-                ou_parent_id=ou_parent_id,
+                ou_parent_ids=None,
                 cutoff_date=cutoff_date,
             )
 

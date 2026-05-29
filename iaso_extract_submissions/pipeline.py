@@ -50,13 +50,14 @@ def _force_string_csv_inference() -> Iterator[None]:
     required=True,
 )
 @parameter(
-    "ou_parent_id",
-    name="Organization Unit Parent",
+    "ou_parent_ids",
+    name="Organization Unit Parents",
     type=int,
+    multiple=True,
     widget=IASOWidget.IASO_ORG_UNITS,
     connection="iaso_connection",  # type: ignore
     required=False,
-    help="Filter submissions to those from org units under the specified parent unit ID (optional)",
+    help="Filter submissions to those from org units under one or more parent unit IDs (optional)",
 )
 @parameter(
     "last_updated",
@@ -121,7 +122,7 @@ def _force_string_csv_inference() -> Iterator[None]:
 def iaso_extract_submissions(
     iaso_connection: IASOConnection,
     form_id: int,
-    ou_parent_id: int | None,
+    ou_parent_ids: list[int] | None,
     last_updated: str | None,
     choices_to_labels: bool | None,
     output_file_name: str | None,
@@ -139,7 +140,7 @@ def iaso_extract_submissions(
     cutoff_date = parse_cutoff_date(last_updated)
 
     submissions = fetch_submissions(
-        iaso=iaso, form_id=form_id, ou_parent_id=ou_parent_id, cutoff_date=cutoff_date
+        iaso=iaso, form_id=form_id, ou_parent_ids=ou_parent_ids, cutoff_date=cutoff_date
     )
     submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
     submissions = deduplicate_columns(submissions)
@@ -221,15 +222,19 @@ def parse_cutoff_date(date_str: str | None) -> str | None:
 def fetch_submissions(
     iaso: IASO,
     form_id: int,
-    ou_parent_id: int | None,
+    ou_parent_ids: list[int] | None,
     cutoff_date: str | None,
 ) -> pl.DataFrame:
     """Retrieve form submissions from IASO API.
 
+    When several parent org unit IDs are provided, one toolbox call is issued per
+    parent and the resulting DataFrames are concatenated (and deduplicated by id)
+    because the toolbox helper only accepts a single `ou_parent_id`.
+
     Args:
         iaso: Authenticated IASO client
         form_id: Target form identifier
-        ou_parent_id: Optional parent org unit ID to filter submissions
+        ou_parent_ids: Optional list of parent org unit IDs to filter submissions
         cutoff_date: Optional date filter
 
     Returns:
@@ -238,9 +243,21 @@ def fetch_submissions(
     try:
         current_run.log_info(f"Fetching submissions for form ID {form_id}")
         with _force_string_csv_inference():
-            return dataframe.extract_submissions(
-                iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=ou_parent_id
-            )
+            if not ou_parent_ids:
+                return dataframe.extract_submissions(
+                    iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=None
+                )
+
+            frames = [
+                dataframe.extract_submissions(
+                    iaso=iaso,
+                    form_id=form_id,
+                    last_updated=cutoff_date,
+                    ou_parent_id=parent_id,
+                )
+                for parent_id in ou_parent_ids
+            ]
+            return pl.concat(frames, how="diagonal_relaxed").unique(subset=["id"])
     except Exception as exc:
         current_run.log_error(f"Submission retrieval failed: {exc}")
         raise
