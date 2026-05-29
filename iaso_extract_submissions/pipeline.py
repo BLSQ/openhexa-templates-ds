@@ -31,6 +31,15 @@ from utils import clean_string, in_dataset_version
     required=True,
 )
 @parameter(
+    "ou_parent_id",
+    name="Organization Unit Parent",
+    type=int,
+    widget=IASOWidget.IASO_ORG_UNITS,
+    connection="iaso_connection",  # type: ignore
+    required=False,
+    help="Filter submissions to those from org units under the specified parent unit ID (optional)",
+)
+@parameter(
     "last_updated",
     name="Last Updated Date",
     type=str,  # type: ignore
@@ -93,6 +102,7 @@ from utils import clean_string, in_dataset_version
 def iaso_extract_submissions(
     iaso_connection: IASOConnection,
     form_id: int,
+    ou_parent_id: int | None,
     last_updated: str | None,
     choices_to_labels: bool | None,
     output_file_name: str | None,
@@ -109,7 +119,7 @@ def iaso_extract_submissions(
     form_name = get_form_name(iaso, form_id)
     cutoff_date = parse_cutoff_date(last_updated)
 
-    submissions = fetch_submissions(iaso, form_id, cutoff_date)
+    submissions = fetch_submissions(iaso, form_id, ou_parent_id, cutoff_date)
     submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
     submissions = deduplicate_columns(submissions)
 
@@ -190,6 +200,7 @@ def parse_cutoff_date(date_str: str | None) -> str | None:
 def fetch_submissions(
     iaso: IASO,
     form_id: int,
+    ou_parent_id: int | None,
     cutoff_date: str | None,
 ) -> pl.DataFrame:
     """Retrieve form submissions from IASO API.
@@ -197,6 +208,7 @@ def fetch_submissions(
     Args:
         iaso: Authenticated IASO client
         form_id: Target form identifier
+        ou_parent_id: Optional parent org unit ID to filter submissions
         cutoff_date: Optional date filter
 
     Returns:
@@ -204,7 +216,9 @@ def fetch_submissions(
     """
     try:
         current_run.log_info(f"Fetching submissions for form ID {form_id}")
-        return dataframe.extract_submissions(iaso, form_id, cutoff_date)
+        return dataframe.extract_submissions(
+            iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=ou_parent_id
+        )
     except Exception as exc:
         current_run.log_error(f"Submission retrieval failed: {exc}")
         raise

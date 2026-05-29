@@ -1,8 +1,12 @@
-import json
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from pipeline import (
     authenticate_iaso,
     clean_string,
@@ -16,13 +20,11 @@ class FakeIASOConnection:  # noqa: B903
     """Simple fake IASOConnection for testing."""
 
     def __init__(
-            self, 
-            url: str = "https://iaso.test", 
-            username: str = "user", 
-            password: str = "pass"):
+        self, url: str = "https://iaso.test", username: str = "user", password: str = "pass"
+    ):
         self.url = url
         self.username = username
-        self.password = password    
+        self.password = password
 
 
 def test_successful_iaso_authentication():
@@ -30,11 +32,10 @@ def test_successful_iaso_authentication():
     conn = FakeIASOConnection()
 
     with patch("pipeline.IASO") as mock_iaso, patch("pipeline.current_run") as mock_current_run:
-
         mock_iaso_instance = MagicMock()
         mock_iaso.return_value = mock_iaso_instance
 
-        result = authenticate_iaso(conn)
+        result = authenticate_iaso(conn)  # type: ignore
 
         # checking that IASO is instantiated correctly
         mock_iaso.assert_called_once_with(conn.url, conn.username, conn.password)
@@ -54,8 +55,8 @@ def test_authenticate_iaso_failure():
         mock_iaso.side_effect = Exception("Invalid credentials")
 
         with pytest.raises(RuntimeError) as excinfo:
-            authenticate_iaso(conn)
-        
+            authenticate_iaso(conn)  # type: ignore
+
         # Check that the error log is written
         mock_current_run.log_error.assert_called_once()
         assert "IASO authentication failed" in str(excinfo.value)
@@ -70,7 +71,7 @@ def test_authenticate_iaso_failure():
 
 
 @pytest.mark.parametrize(
-        ("input_str", "expected"),
+    ("input_str", "expected"),
     [
         ("Household Survey", "household_survey"),
         ("   Survey Name   ", "survey_name"),
@@ -93,10 +94,11 @@ def test_clean_string(input_str: str, expected: str):
 # get_form_name tests
 # -------------------------------------------------------------------
 
+
 class FakeResponse:
     """Minimal fake response object with json() method."""
 
-    def __init__(self, payload: json):
+    def __init__(self, payload: dict):
         self._payload = payload
 
     def json(self):  # noqa: ANN201, D102
@@ -106,9 +108,7 @@ class FakeResponse:
 def test_get_form_name_success():
     """Should fetch form name and return cleaned value."""
     iaso = MagicMock()
-    iaso.api_client.get.return_value = FakeResponse(
-        {"name": "  École Santé Form  "}
-    )
+    iaso.api_client.get.return_value = FakeResponse({"name": "  École Santé Form  "})
 
     with patch("pipeline.current_run") as mock_current_run:
         result = get_form_name(iaso, form_id=123)
@@ -154,6 +154,7 @@ def test_get_form_name_api_failure():
 # parse_cutoff_date tests
 # -------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     ("input_date", "expected"),
     [
@@ -183,12 +184,12 @@ def test_parse_cutoff_date_none_or_empty(input_date: str):
 @pytest.mark.parametrize(
     "input_date",
     [
-        "01-01-2024",   # wrong format
-        "2024/01/01",   # wrong separator
-        "2024-13-01",   # invalid month
-        "2024-00-10",   # invalid month
-        "2024-02-30",   # invalid day
-        "abcd-ef-gh",   # not a date
+        "01-01-2024",  # wrong format
+        "2024/01/01",  # wrong separator
+        "2024-13-01",  # invalid month
+        "2024-00-10",  # invalid month
+        "2024-02-30",  # invalid day
+        "abcd-ef-gh",  # not a date
     ],
 )
 def test_parse_cutoff_date_invalid_format(input_date: str):
@@ -207,10 +208,12 @@ def test_parse_cutoff_date_invalid_format(input_date: str):
 # fetch_submissions tests
 # -------------------------------------------------------------------
 
+
 def test_fetch_submissions_success():
     """Should log info and return DataFrame when extraction succeeds."""
     iaso = MagicMock()
     form_id = 123
+    ou_parent_id = 456
     cutoff_date = "2024-01-01"
 
     expected_df = pl.DataFrame(
@@ -220,14 +223,16 @@ def test_fetch_submissions_success():
         }
     )
 
-    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
-         patch("pipeline.current_run") as mock_current_run:
-
+    with (
+        patch("pipeline.dataframe.extract_submissions") as mock_extract,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
         mock_extract.return_value = expected_df
 
         result = fetch_submissions(
             iaso=iaso,
             form_id=form_id,
+            ou_parent_id=ou_parent_id,
             cutoff_date=cutoff_date,
         )
 
@@ -237,7 +242,7 @@ def test_fetch_submissions_success():
         mock_current_run.log_error.assert_not_called()
 
         mock_extract.assert_called_once_with(
-            iaso, form_id, cutoff_date
+            iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=ou_parent_id
         )
 
         assert isinstance(result, pl.DataFrame)
@@ -251,19 +256,21 @@ def test_fetch_submissions_success_without_cutoff_date():
 
     expected_df = pl.DataFrame({"id": []})
 
-    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
-         patch("pipeline.current_run") as mock_current_run:
-
+    with (
+        patch("pipeline.dataframe.extract_submissions") as mock_extract,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
         mock_extract.return_value = expected_df
 
         result = fetch_submissions(
             iaso=iaso,
             form_id=form_id,
+            ou_parent_id=None,
             cutoff_date=None,
         )
 
         mock_extract.assert_called_once_with(
-            iaso, form_id, None
+            iaso=iaso, form_id=form_id, last_updated=None, ou_parent_id=None
         )
         mock_current_run.log_error.assert_not_called()
 
@@ -274,17 +281,20 @@ def test_fetch_submissions_failure():
     """Should log error and re-raise exception when extraction fails."""
     iaso = MagicMock()
     form_id = 999
+    ou_parent_id = None
     cutoff_date = "2024-01-01"
 
-    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
-         patch("pipeline.current_run") as mock_current_run:
-
+    with (
+        patch("pipeline.dataframe.extract_submissions") as mock_extract,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
         mock_extract.side_effect = RuntimeError("API timeout")
 
         with pytest.raises(RuntimeError):
             fetch_submissions(
                 iaso=iaso,
                 form_id=form_id,
+                ou_parent_id=ou_parent_id,
                 cutoff_date=cutoff_date,
             )
 
