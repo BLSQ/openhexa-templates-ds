@@ -4,7 +4,7 @@
 
 This pipeline extracts and processes form submissions data from a IASO instance. Key features:
 - Authenticates with IASO using provided credentials
-- Fetches form submissions (optionally filtered by last updated date)
+- Fetches form submissions (optionally filtered by last updated date and/or parent org unit)
 - Converts choice codes to human-readable labels (optional)
 - Processes and cleans the data (deduplicates columns, handles list-type responses)
 - Exports to multiple formats (CSV, Parquet, Excel)
@@ -20,6 +20,7 @@ This pipeline extracts and processes form submissions data from a IASO instance.
 |-----------|------|----------|---------|-------------|
 | `iaso_connection` | IASOConnection | Yes | - |Authentication details for IASO (url, username, password) |
 | `form_id` | int | Yes | - |ID of the form to extract submissions from |
+| `ou_parent_id` | int | No | - | Parent org unit ID — restrict submissions to org units under this parent |
 | `last_updated` | str | No | - | ISO date (YYYY-MM-DD) for incremental extraction (only submissions updated after this date) |
 | `choices_to_labels` | bool | No | `True` | Convert choice codes to labels |
 | `output_file_name` | str | No | - | Custom output path/filename (without extension) |
