@@ -1,0 +1,12 @@
+{
+    "source_connection": "dhis2-demo-2-39",
+    "program": "IpHINAT79UW",
+    "program_stage": null,
+    "org_units": [
+        "ImspTQPwCqd"
+    ],
+    "status": "COMPLETED",
+    "since_date": "2020-01-01",
+    "output_format": "parquet",
+    "output_path": null
+}

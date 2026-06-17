@@ -1,0 +1,2 @@
+openhexa.sdk>=1.0.0
+openhexa-toolbox[dhis2]>=0.1.0

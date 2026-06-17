@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+WORKDIR /workspace
+
+# System deps (add if your pipeline needs them)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates git && rm -rf /var/lib/apt/lists/*
+
+# Python deps
+RUN pip install --no-cache-dir \
+    openhexa.sdk openhexa-toolbox[dhis2] pytest pytest-cov ruff mypy
+
+# Copy project
+COPY . /workspace
+
+# Install the pipeline package in development mode
+RUN pip install -e ".[dev]"
+
+# Default command will run the test suite
+CMD ["pytest", "-q"]

@@ -1,0 +1,15 @@
+services:
+  dhis2:
+    image: ${DHIS2_IMAGE:-dhis2/core:40.8.0}
+    environment:
+      - WAIT_FOR_DB=true
+      - JAVA_OPTS=-Xms1g -Xmx2g
+      # Seed the Sierra Leone demo DB (adjust version as needed)
+      - DHIS2_DB_DUMP_URL=${DHIS2_DB_DUMP_URL:-https://databases.dhis2.org/sierra-leone/2.40/dhis2-db-sierra-leone.sql.gz}
+    ports:
+      - "8080:8080"        # Web app
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-S", "http://localhost:8080", "-O", "/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 30

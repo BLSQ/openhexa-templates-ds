@@ -1,0 +1,43 @@
+# DHIS2 with Sierra Leone demo database for integration testing
+services:
+  dhis2:
+    image: dhis2/core:2.40.4
+    ports:
+      - "8080:8080"
+    environment:
+      # Database connection
+      DHIS2_DATABASE_HOST: postgres
+      DHIS2_DATABASE_NAME: dhis2
+      DHIS2_DATABASE_USERNAME: dhis2
+      DHIS2_DATABASE_PASSWORD: dhis2
+      # Disable first run initialization
+      DHIS2_SKIP_DB_MIGRATION: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/system/info"]
+      interval: 20s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    volumes:
+      - dhis2-data:/opt/dhis2
+      
+  postgres:
+    image: postgis/postgis:14-3.2
+    environment:
+      POSTGRES_DB: dhis2
+      POSTGRES_USER: dhis2
+      POSTGRES_PASSWORD: dhis2
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dhis2 -d dhis2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      
+volumes:
+  dhis2-data:
+  postgres-data:

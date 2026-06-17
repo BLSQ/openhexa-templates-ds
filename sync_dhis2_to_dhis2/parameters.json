@@ -1,0 +1,7 @@
+{
+    "source_connection": "burundi-snis",
+    "target_connection": "burundi-pbf",
+    "mapping_file": "mapping_bdi_snis_pbf_CDS.json",
+    "since_date": "2024-01-01",
+    "dry_run": true
+}

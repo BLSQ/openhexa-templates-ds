@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+WORKDIR /workspace
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates git && rm -rf /var/lib/apt/lists/*
+
+# CRITICAL: Install with [dhis2] extra for DHIS2 functionality
+RUN pip install --no-cache-dir \
+    openhexa.sdk openhexa-toolbox[dhis2] pytest pytest-cov ruff mypy
+
+# Copy project
+COPY . /workspace
+
+# CRITICAL: Set Python path for test imports
+ENV PYTHONPATH=/workspace
+
+# Default command runs complete test suite
+CMD ["pytest", "-q"]

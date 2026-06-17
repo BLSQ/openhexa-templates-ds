@@ -1,0 +1,23 @@
+{
+    "folders": [
+        {
+            "name": "Repository Root",
+            "path": "."
+        },
+        {
+            "name": "DHIS2 Sync Pipeline",
+            "path": "./sync_dhis2_to_dhis2"
+        }
+    ],
+    "settings": {
+        "python.defaultInterpreterPath": "./sync_dhis2_to_dhis2/venv/bin/python"
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.debugpy",
+            "charliermarsh.ruff",
+            "ms-azuretools.vscode-docker"
+        ]
+    }
+}
