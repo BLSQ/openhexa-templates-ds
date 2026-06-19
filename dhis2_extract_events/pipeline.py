@@ -5,11 +5,14 @@ from pathlib import Path
 
 import config
 import polars as pl
+import urllib3
 from dateutil.relativedelta import relativedelta
 from openhexa.sdk import DHIS2Connection, current_run, parameter, pipeline, workspace
 from openhexa.sdk.datasets.dataset import Dataset
+from openhexa.toolbox import lineage
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import get_data_elements, get_organisation_units
+from openhexa.toolbox.lineage import EventType
 from toolbox import extract_events, get_program_stages, get_programs, join_object_names
 from utils import (
     default_output_path,
@@ -19,6 +22,8 @@ from utils import (
     write_to_db,
 )
 
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 @pipeline("DHIS event extract")
 @parameter(
@@ -26,12 +31,14 @@ from utils import (
     type=DHIS2Connection,
     help="Connection to DHIS2",
     required=True,
+    default="dhis2-cousp",
 )
 @parameter(
     "program_id",
     type=str,
     help="ID of the DHIS2 event program",
     required=True,
+    default="Fw4tCvSayjE",
 )
 @parameter(
     code="input_ous",
@@ -40,6 +47,7 @@ from utils import (
     name="Organisation units",
     help="IDs of organisation units to extract events from",
     required=True,
+    default=["rdX5nU5lrcx"],
 )
 @parameter(
     code="include_children",
@@ -68,6 +76,7 @@ from utils import (
     name="Number of months to extract.",
     help="If no start_date is provided, it will be calculated as end_date - period.",
     required=False,
+    default=2,
 )
 @parameter(
     code="dst_file",
@@ -103,6 +112,7 @@ def dhis_event_extract(
     include_children: bool = False,
 ):
     """Pipeline to extract events from DHIS2."""
+    initialize_lineage(True)
     cache_dir = Path(workspace.files_path) / ".cache"
     dhis2 = DHIS2(connection=dhis_con, cache_dir=cache_dir)
     check_server_health(dhis2)
@@ -121,8 +131,54 @@ def dhis_event_extract(
         current_run.log_info(f"Start date not provided, using {start_date}")
 
     current_run.log_info("Reading metadata from source DHIS2 instance")
-    all_ous = get_organisation_units(dhis2)
-    de_metadata = get_data_elements(dhis2)
+    dhis2_dataset = lineage._client.dataset_from_connection(
+        connection_name="dhis2_connection", connection_type="DHIS2Connection"
+    )
+    lineage.event(
+        EventType.START,
+        task_name="get_organisation_units",
+        inputs=[dhis2_dataset],
+        outputs=["all_ous"],
+    )
+    try:
+        all_ous = get_organisation_units(dhis2)
+        lineage.event(
+            EventType.COMPLETE,
+            task_name="get_organisation_units",
+            inputs=[dhis2_dataset],
+            outputs=["all_ous"],
+        )
+    except Exception:
+        lineage.event(
+            EventType.FAIL,
+            task_name="get_organisation_units",
+            inputs=[dhis2_dataset],
+            outputs=["all_ous"],
+        )
+        raise
+    lineage.event(
+        EventType.START,
+        task_name="get_data_elements",
+        inputs=[dhis2_dataset],
+        outputs=["de_metadata"],
+    )
+    try:
+        de_metadata = get_data_elements(dhis2)
+        lineage.event(
+            EventType.COMPLETE,
+            task_name="get_data_elements",
+            inputs=[dhis2_dataset],
+            outputs=["de_metadata"],
+        )
+    except Exception:
+        lineage.event(
+            EventType.FAIL,
+            task_name="get_data_elements",
+            inputs=[dhis2_dataset],
+            outputs=["de_metadata"],
+        )
+        raise
+
     program_stages = get_program_stages(dhis2)
     program_metadata = get_programs(dhis2)
     current_run.log_info("Metadata from source DHIS2 instance read.")
@@ -174,6 +230,33 @@ def dhis_event_extract(
 
     if dst_table:
         write_to_db(df=events_complete, table_name=dst_table)
+
+    lineage.pipeline_complete()
+
+
+def initialize_lineage(local: bool):
+    """Initialize lineage tracking for the pipeline."""
+    if local:
+        workspace_slug = "local"
+    else:
+        workspace_slug = workspace.slug
+    pipeline_slug = "dhis2_event_extract"
+
+    lineage.init_client(
+        url="https://lineage.demo.openhexa.org/",
+        workspace_slug=workspace_slug,
+        pipeline_slug=pipeline_slug,
+        enable_pipeline_jobs="true",
+    )
+
+    if lineage.is_initialized():
+        current_run.log_info(
+            f"OpenLineage client initialized successfully, run id: {lineage._client.run_id} ."
+        )
+    else:
+        current_run.log_warning("OpenLineage client initialization failed.")
+
+    lineage.pipeline_start()
 
 
 def check_program(program_id: str, program_metadata: pl.DataFrame):

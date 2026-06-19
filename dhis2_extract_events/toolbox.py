@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 import polars as pl
+from lineage_wrapper import lineage_task
 from openhexa.sdk import current_run
 from openhexa.toolbox.dhis2 import DHIS2
 
@@ -12,6 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 # Modifying this function from the OH toolbox.
+@lineage_task(
+    task_name="join_object_names",
+    inputs=["events", "de_metadata", "all_ous", "program_stages", "program_metadata"],
+    outputs=["events_complete"],
+)
 def join_object_names(
     df: pl.DataFrame,
     data_elements: pl.DataFrame | None = None,
@@ -184,6 +190,11 @@ def programs(
     ]
 
 
+@lineage_task(
+    task_name="get_programs",
+    inputs=["dhis2"],
+    outputs=["program_metadata"],
+)
 def get_programs(dhis2: DHIS2, filters: list[str] | None = None) -> pl.DataFrame:
     """Extract programs metadata.
 
@@ -206,6 +217,11 @@ def get_programs(dhis2: DHIS2, filters: list[str] | None = None) -> pl.DataFrame
     return df.select("id", "name", pl.col("programType").alias("program_type"))
 
 
+@lineage_task(
+    task_name="get_program_stages",
+    inputs=["dhis2"],
+    outputs=["program_stages"],
+)
 def get_program_stages(dhis2: DHIS2, filters: list[str] | None = None) -> pl.DataFrame:
     """Extract programStages metadata.
 
@@ -248,6 +264,11 @@ def get_program_stages(dhis2: DHIS2, filters: list[str] | None = None) -> pl.Dat
 
 
 # Modifying this function from the OH toolbox.
+@lineage_task(
+    task_name="extract_events",
+    inputs=["dhis2"],
+    outputs=["events"],
+)
 def extract_events(
     dhis2: DHIS2,
     program_id: str,
