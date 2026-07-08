@@ -127,11 +127,16 @@ def get_form_metadata(
         resp = requests.get(xls_url, timeout=30)
         resp.raise_for_status()
         bio = BytesIO(resp.content)
-        df_pd = (
-            pd.read_excel(bio, dtype=str)
-            if type_metadata == "questions"
-            else pd.read_excel(bio, sheet_name="choices", dtype=str)
-        )
+        if type_metadata == "questions":
+            # The survey sheet is the questions definition; fall back to the first
+            # sheet only if a form does not name it "survey".
+            try:
+                df_pd = pd.read_excel(bio, sheet_name="survey", dtype=str)
+            except (ValueError, KeyError):
+                bio.seek(0)
+                df_pd = pd.read_excel(bio, dtype=str)
+        else:
+            df_pd = pd.read_excel(bio, sheet_name="choices", dtype=str)
         df_pd = df_pd.dropna(how="all")
         df_pl = pl.from_pandas(df_pd)
 
@@ -221,6 +226,7 @@ def get_token_headers(iaso: IASO) -> dict[str, str]:
     Returns:
         dict[str, str]: Authorization header mapping.
     """
+    token_res = None
     try:
         token_res = iaso.api_client.post(
             "/api/token/",
@@ -229,11 +235,13 @@ def get_token_headers(iaso: IASO) -> dict[str, str]:
         token_res.raise_for_status()
         token = token_res.json().get("access")
     except requests.RequestException as exc:
-        msg = f"Failed to obtain access token (network): {exc} - response: {token_res.text}"
+        resp_text = getattr(token_res, "text", None)
+        msg = f"Failed to obtain access token (network): {exc} - response: {resp_text}"
         current_run.log_error(msg)
         raise
     except json.JSONDecodeError as exc:
-        msg = f"Failed to parse token response JSON: {exc} - response: {token_res.text}"
+        resp_text = getattr(token_res, "text", None)
+        msg = f"Failed to parse token response JSON: {exc} - response: {resp_text}"
         current_run.log_error(msg)
         raise
 

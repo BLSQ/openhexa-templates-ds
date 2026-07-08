@@ -1,7 +1,7 @@
 """Template for newly generated pipelines."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -18,7 +18,6 @@ from iaso_client import (
     validate_user_roles,
 )
 from iaso_io import read_submissions_file
-from jinja2 import Template
 from openhexa.sdk import (
     File,  # type: ignore
     IASOConnection,
@@ -29,7 +28,8 @@ from openhexa.sdk import (
 )
 from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO
-from template import enrich_submission_xml, generate_xml_template
+from template import enrich_submission_xml, generate_xml_template, render_submission_xml
+from utils import optional_float, to_epoch
 from validation import validate_data_structure, validate_field_constraints, validate_global_data
 
 CAST_MAP = {
@@ -38,6 +38,30 @@ CAST_MAP = {
     "Float64": pl.Float64,
     "Boolean": pl.Boolean,
 }
+
+
+def _same_host(iaso: IASO, netloc: str) -> bool:
+    """Return whether a network location matches the IASO server host.
+
+    Used to decide if the IASO bearer token may be forwarded to a submission
+    endpoint. When the IASO host cannot be determined, the previous behaviour
+    (forwarding the token) is preserved to avoid breaking existing setups.
+
+    Args:
+        iaso (IASO): The authenticated IASO client.
+        netloc (str): The target host (``host:port``) to compare against.
+
+    Returns:
+        bool: True if hosts match or the IASO host is unknown.
+    """
+    base_url = ""
+    for attr in ("server_url", "url", "base_url"):
+        base_url = str(getattr(iaso.api_client, attr, "") or "")
+        if base_url:
+            break
+    if not base_url:
+        return True
+    return urlparse(base_url).netloc == netloc
 
 
 @pipeline("iaso_import_submissions")
@@ -238,6 +262,18 @@ def _select_template_and_is_valid(
             - is_valid: whether the record passes validation (or strict_validation is disabled)
             - xml_template: the XML template string to use for rendering this record, or None
     """
+    # Select the template first; this never depends on validation.
+    version = str(record.get("form_version") or "")
+    if "latest_version" in templates:
+        xml_template = templates["latest_version"]
+    else:
+        xml_template = templates.get(record.get("form_version")) or templates.get(version)
+
+    # When strict validation is disabled, accept the record without running the
+    # (potentially expensive and metadata-sensitive) validation at all.
+    if not strict_validation:
+        return True, xml_template
+
     if "latest_version" in templates:
         constraints_present = "constraints_validation_summary" in df.columns
         choices_present = "choices_validation_summary" in df.columns
@@ -252,10 +288,7 @@ def _select_template_and_is_valid(
             is_valid = bool(record.get("choices_validation_summary"))
         else:
             is_valid = True
-
-        xml_template = templates["latest_version"]
     else:
-        version = str(record.get("form_version") or "")
         questions_for_validation = (
             questions_by_version.get(version, questions) if questions_by_version else questions
         )
@@ -265,11 +298,6 @@ def _select_template_and_is_valid(
         is_valid = validate_field_constraints(
             record, questions_for_validation, choices_for_validation
         )
-        xml_template = templates.get(record.get("form_version")) or templates.get(version)
-
-    # If strict validation is disabled, accept the record regardless
-    if not strict_validation:
-        is_valid = True
 
     return is_valid, xml_template
 
@@ -377,22 +405,27 @@ def handle_create_mode(
                 summary["ignored"] += 1
                 continue
 
+            org_unit_id = record.get("org_unit_id")
+            if org_unit_id is None:
+                current_run.log_error("Skipping record with missing 'org_unit_id' value")
+                summary["ignored"] += 1
+                continue
+
             data = {**record, **{"uuid": the_uuid}}
-            xml_data = Template(xml_template).render(
-                **{k: v if v is not None else "" for k, v in data.items()}
-            )
+            xml_data = render_submission_xml(xml_template, data)
             with file_path.open("w", encoding="utf-8") as f:
                 f.write(xml_data)
 
+            created_at = to_epoch(record.get("created_at")) or int(datetime.now(tz=UTC).timestamp())
             instance_body = {
                 "id": the_uuid,
-                "orgUnitId": int(record.get("org_unit_id")),  # type: ignore
-                "created_at": int(datetime.now().timestamp()),
+                "orgUnitId": int(org_unit_id),
+                "created_at": created_at,
                 "formId": form_id,
-                "accuracy": float(record.get("accuracy") or 0) if "accuracy" in record else 0,
-                "altitude": float(record.get("altitude") or 0) if "altitude" in record else 0,
-                "latitude": float(record.get("latitude") or 0) if "latitude" in record else None,
-                "longitude": float(record.get("longitude") or 0) if "longitude" in record else None,
+                "accuracy": optional_float(record, "accuracy"),
+                "altitude": optional_float(record, "altitude"),
+                "latitude": optional_float(record, "latitude"),
+                "longitude": optional_float(record, "longitude"),
                 "file": file_path.as_posix(),
                 "name": file_path.name,
             }
@@ -406,7 +439,7 @@ def handle_create_mode(
             if inst_res.status_code not in (200, 201):
                 current_run.log_error(
                     "Failed to create instance for record "
-                    f"(org_unit_id={record.get('org_unit_id')}), "
+                    f"(org_unit_id={org_unit_id}), "
                     f"status={inst_res.status_code}, resp={getattr(inst_res, 'text', None)}"
                 )
                 summary["ignored"] += 1
@@ -420,15 +453,22 @@ def handle_create_mode(
             if upload_res.status_code == 201:
                 summary["imported"] += 1
             else:
+                # The instance was registered but the XML body failed to upload:
+                # flag the potential orphan so it can be cleaned up in IASO.
                 current_run.log_error(
                     "Upload failed for "
                     f"{file_path.name}: status={upload_res.status_code} "
-                    f"resp={getattr(upload_res, 'text', None)}"
+                    f"resp={getattr(upload_res, 'text', None)}. "
+                    f"An empty instance (uuid={the_uuid}, org_unit_id={org_unit_id}) "
+                    "may remain in IASO and require manual deletion."
                 )
                 summary["ignored"] += 1
 
         except Exception as exc:
-            current_run.log_error(f"Error processing record {record.get('org_unit_id')}: {exc}")
+            current_run.log_error(
+                f"Error processing record (org_unit_id={record.get('org_unit_id')}): "
+                f"{type(exc).__name__}: {exc}"
+            )
             summary["ignored"] += 1
             continue
 
@@ -504,14 +544,10 @@ def handle_update_mode(
                 payload = {
                     "org_unit": str(record.get("org_unit_id")),
                     "formID": int(form_id),
-                    "accuracy": float(record.get("accuracy") or 0) if "accuracy" in record else 0,
-                    "altitude": float(record.get("altitude") or 0) if "altitude" in record else 0,
-                    "latitude": float(record.get("latitude") or 0)
-                    if "latitude" in record
-                    else None,
-                    "longitude": float(record.get("longitude") or 0)
-                    if "longitude" in record
-                    else None,
+                    "accuracy": optional_float(record, "accuracy"),
+                    "altitude": optional_float(record, "altitude"),
+                    "latitude": optional_float(record, "latitude"),
+                    "longitude": optional_float(record, "longitude"),
                 }
 
                 iaso.api_client.patch(
@@ -547,12 +583,10 @@ def handle_update_mode(
             the_uuid = str(instance_uuid)
             file_path = output_dir / f"update_{the_uuid}.xml"
             data = {**record, **{"uuid": the_uuid}}
-            xml_data = Template(xml_template).render(
-                **{k: v if v is not None else "" for k, v in data.items()}
-            )
-            current_run.log_debug(xml_data)
+            xml_str = render_submission_xml(xml_template, data)
+            current_run.log_debug(xml_str)
             xml_data = enrich_submission_xml(
-                xml_str=xml_data,
+                xml_str=xml_str,
                 iaso_instance=int(record.get("id")),  # type: ignore
                 edit_user_id=int(user_id) if user_id else None,
             )
@@ -568,12 +602,17 @@ def handle_update_mode(
 
             edit_url = urlparse(edit_url_res.json().get("edit_url", ""))
 
+            # Only forward the IASO bearer token when the Enketo submission host
+            # is the same as the IASO host; otherwise avoid leaking it cross-host.
+            submission_headers = headers if _same_host(iaso, edit_url.netloc) else {}
+
             with file_path.open("rb") as fp:
                 files = {"xml_submission_file": (file_path.name, fp, "application/xml")}
                 upload_res = requests.post(
                     f"{edit_url.scheme}://{edit_url.netloc}/submission/{edit_url.path.split('/')[-1]}",
-                    headers=headers,
+                    headers=submission_headers,
                     files=files,
+                    timeout=60,
                 )
             if upload_res.status_code in (200, 201):
                 summary["updated"] += 1
@@ -585,7 +624,9 @@ def handle_update_mode(
                 )
                 summary["ignored"] += 1
         except Exception as exc:
-            current_run.log_error(f"Error processing record {record.get('org_unit_id', '')}: {exc}")
+            current_run.log_error(
+                f"Error processing record (id={record.get('id', '')}): {type(exc).__name__}: {exc}"
+            )
             summary["ignored"] += 1
             continue
 
@@ -613,6 +654,7 @@ def push_submissions(
     """
     headers = get_token_headers(iaso)
     meta = fetch_form_meta(iaso, form_id)
+    summary = {"imported": 0, "updated": 0, "ignored": 0, "deleted": 0}
 
     if import_strategy == "DELETE":
         current_run.log_info(

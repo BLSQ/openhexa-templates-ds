@@ -3,7 +3,75 @@ import re
 import polars as pl
 from openhexa.sdk import current_run
 from pydantic import BaseModel, Field
-from utils import calculate_to_polars_expr
+from utils import (
+    calculate_to_polars_expr,
+    extract_list_name,
+    get_choices_list_column,
+    get_choices_name_column,
+    is_select_multiple,
+)
+
+
+def _build_choice_map(
+    questions: pl.DataFrame, choices: pl.DataFrame
+) -> dict[str, tuple[set[str], bool]]:
+    """Map each select question name to its allowed choice names and multi flag.
+
+    The mapping resolves two XLSForm subtleties that the naive implementation
+    missed:
+
+    - the choice list name comes from the question ``type`` (``select_one <list>``),
+      not from the question ``name``;
+    - the value stored in a submission is the choice ``name`` (code), never the
+      ``label`` (which may also be multilingual, e.g. ``label::French (fr)``).
+
+    Args:
+        questions (pl.DataFrame): Survey-sheet metadata.
+        choices (pl.DataFrame): Choices-sheet metadata.
+
+    Returns:
+        dict[str, tuple[set[str], bool]]: question name -> (allowed names,
+        is_select_multiple).
+    """
+    if questions.is_empty() or "type" not in questions.columns or "name" not in questions.columns:
+        return {}
+
+    list_col = get_choices_list_column(choices)
+    name_col = get_choices_name_column(choices)
+    if list_col is None or name_col is None:
+        return {}
+
+    mapping: dict[str, tuple[set[str], bool]] = {}
+    for row in questions.select(["type", "name"]).iter_rows(named=True):
+        list_name = extract_list_name(row["type"])
+        if list_name is None or not row["name"]:
+            continue
+        allowed = set(
+            choices.filter(pl.col(list_col) == list_name)[name_col].drop_nulls().to_list()
+        )
+        mapping[row["name"]] = (allowed, is_select_multiple(row["type"]))
+    return mapping
+
+
+def _value_in_choices(value: object, allowed: set[str], multiple: bool) -> bool:
+    """Check that a submitted select value belongs to the allowed choice names.
+
+    Args:
+        value (object): The submitted value (a single name, or space-separated
+            names for a multi-select).
+        allowed (set[str]): Allowed choice names for the question.
+        multiple (bool): Whether the question is a multi-select.
+
+    Returns:
+        bool: True if the value (or every token of a multi-select) is allowed.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        # An empty answer is not an invalid choice; requiredness is handled elsewhere.
+        return True
+    if multiple:
+        tokens = [t for t in str(value).split() if t]
+        return all(token in allowed for token in tokens)
+    return str(value) in allowed
 
 
 class ValidationResult(BaseModel):
@@ -91,9 +159,14 @@ def validate_data_structure(
     current_columns = set(df.columns)
 
     # 1. Check for required columns
-    required_columns = requirements["required"] | set(
-        questions.filter(pl.col("required") == "yes")["name"].unique()
-    )
+    form_required: set[str] = set()
+    if "required" in questions.columns and "name" in questions.columns:
+        form_required = set(
+            questions.filter(pl.col("required").cast(pl.Utf8).str.to_lowercase() == "yes")[
+                "name"
+            ].unique()
+        )
+    required_columns = requirements["required"] | form_required
     missing_required = required_columns - current_columns
 
     if missing_required:
@@ -105,16 +178,17 @@ def validate_data_structure(
         )
 
     # 2. Check for column types
+    has_type = "type" in questions.columns and "name" in questions.columns
+
+    def _names_of_type(type_value: str) -> list[str]:
+        if not has_type:
+            return []
+        return questions.filter(pl.col("type") == type_value)["name"].unique().to_list()
+
     dico_dtypes = {
-        **{name: pl.String for name in questions.filter(pl.col("type") == "text")["name"].unique()},
-        **{
-            name: pl.Int64
-            for name in questions.filter(pl.col("type") == "integer")["name"].unique()
-        },
-        **{
-            name: pl.String
-            for name in questions.filter(pl.col("type") == "calculate")["name"].unique()
-        },
+        **{name: pl.String for name in _names_of_type("text")},
+        **{name: pl.Int64 for name in _names_of_type("integer")},
+        **{name: pl.String for name in _names_of_type("calculate")},
     }
     type_validation_result = _validate_column_types(
         df, {**requirements["types"], **dico_dtypes}, import_strategy
@@ -135,11 +209,14 @@ def validate_data_structure(
     unexpected_columns = current_columns - expected_columns
 
     if unexpected_columns:
-        truly_unexpected = unexpected_columns - set(questions["name"].unique())
+        known_question_names = (
+            set(questions["name"].unique()) if "name" in questions.columns else set()
+        )
+        truly_unexpected = unexpected_columns - known_question_names
         for col in truly_unexpected:
             result.warnings.append(f"Unexpected column found: '{col}'")
 
-    return result.__dict__
+    return dict(result.__dict__)
 
 
 def validate_global_data(
@@ -155,9 +232,14 @@ def validate_global_data(
     Returns:
         DataFrame with added validation columns for constraints and choices.
     """
+    if questions.is_empty() or "name" not in questions.columns:
+        return df
+
     # 1) Computed fields: add missing calculate columns
     computed_fields = (
         questions.filter(pl.col("type") == "calculate").select(["name", "calculation"]).to_dicts()
+        if {"type", "calculation"} <= set(questions.columns)
+        else []
     )
     for rule in computed_fields:
         col_name = rule["name"]
@@ -169,21 +251,28 @@ def validate_global_data(
         try:
             # expr_str is expected to be a Polars expression string using `pl` namespace
             expr = eval(expr_str, {"pl": pl})
-            df = df.with_columns(expr.round().cast(pl.Int64).alias(col_name))
+            df = df.with_columns(expr.alias(col_name))
+            # Only round/int-cast genuinely numeric results; string calculates
+            # (e.g. concat(), if(...,'a','b')) must be kept as-is.
+            if df.schema[col_name].is_numeric():
+                df = df.with_columns(pl.col(col_name).round().cast(pl.Int64).alias(col_name))
             current_run.log_info(
                 f"Added calculated column '{col_name}' to submissions after computation."
             )
         except Exception as exc:  # keep narrow enough but robust
-            current_run.log_critical(
-                f"Failed to compute calculated column '{col_name}': {exc}; filling with 0"
+            current_run.log_warning(
+                f"Could not compute calculated column '{col_name}': {exc}; "
+                "leaving it empty for the submission"
             )
-            df = df.with_columns(pl.lit(0).alias(col_name))
+            df = df.with_columns(pl.lit(None).cast(pl.Utf8).alias(col_name))
 
     # 2) Constraints validation: add <col>_valid boolean columns
     constraints_list = (
         questions.filter(pl.col("constraint").is_not_null())
         .select(["name", "constraint"])
         .to_dicts()
+        if "constraint" in questions.columns
+        else []
     )
     constraint_cols = []
     for rule in constraints_list:
@@ -222,33 +311,32 @@ def validate_global_data(
         # drop individual constraint columns to keep output tidy
         df = df.drop(constraint_cols)
 
-    # 3) Choices validation: vectorized membership checks where possible
-    choices_field = questions.filter(pl.col("type").str.contains("select"))["name"].to_list()
-    list_name = next((c for c in ("list name", "list_name") if c in choices.columns), None)
-    if list_name is None:
+    # 3) Choices validation: compare each submitted value against the allowed
+    # choice *names* of the question's list (resolved from its `type`).
+    choice_map = _build_choice_map(questions, choices)
+    if not choice_map:
         current_run.log_warning(
-            "Choices metadata missing expected column 'list name' or 'list_name'; "
-            "skipping choices validation"
+            "Choices metadata could not be resolved (missing 'list_name'/'name' columns "
+            "or no select questions); skipping choices validation"
         )
         return df
 
     choices_cols = []
-    for col_name in choices_field:
+    for col_name, (allowed, multiple) in choice_map.items():
         if col_name not in df.columns:
             # nothing to validate for absent column
             continue
 
-        # build allowed values for this question
-        allowed = choices.filter(pl.col(list_name) == col_name)["label"].to_list()
-        if not allowed:
-            # no allowed values defined; mark as invalid conservatively
-            df = df.with_columns(pl.lit(False).alias(f"{col_name}_choices_valid"))
-            choices_cols.append(f"{col_name}_choices_valid")
-            continue
-
-        # vectorized membership test
         df = df.with_columns(
-            pl.col(col_name).is_in(allowed).fill_null(False).alias(f"{col_name}_choices_valid")
+            pl.col(col_name)
+            .map_elements(
+                lambda v, allowed=allowed, multiple=multiple: _value_in_choices(
+                    v, allowed, multiple
+                ),
+                return_dtype=pl.Boolean,
+            )
+            .fill_null(True)
+            .alias(f"{col_name}_choices_valid")
         )
         choices_cols.append(f"{col_name}_choices_valid")
 
@@ -277,88 +365,84 @@ def validate_field_constraints(
     Returns:
         bool: True if all field values satisfy their constraints, False otherwise.
     """
-    constraints_fields = questions.filter(pl.col("constraint").is_not_null())["name"].to_list()
-    multiple_choices = questions.filter(pl.col("type").str.contains("select"))["name"].to_list()
-    list_col = next((c for c in ("list name", "list_name") if c in choices.columns), None)
+    has_constraint = "constraint" in questions.columns
+    constraints_fields = (
+        questions.filter(pl.col("constraint").is_not_null())["name"].to_list()
+        if has_constraint
+        else []
+    )
+    choice_map = _build_choice_map(questions, choices)
 
     is_valid = True
     for col, value in record.items():
         if col in constraints_fields:
             constraints = questions.filter(pl.col("name") == col)["constraint"][0]
-            is_valid = is_valid and _validate_value(value, constraints)
+            if constraints is not None:
+                is_valid = is_valid and _validate_value(value, constraints)
 
-        if col in multiple_choices:
-            if list_col is None:
-                continue
-
-            is_valid = (
-                is_valid and value in choices.filter(pl.col(list_col) == col)["label"].to_list()
-            )
+        if col in choice_map:
+            allowed, multiple = choice_map[col]
+            is_valid = is_valid and _value_in_choices(value, allowed, multiple)
     return is_valid
 
 
-def _validate_value(value: str, constraints: str) -> bool:
-    if constraints.startswith("regex"):
-        # Extract pattern
-        pattern = re.search(r"regex\(.,\s*'(.+)'\)", constraints)
-        if not pattern:
-            return False
-        if pattern:
-            try:
-                return bool(re.match(pattern.group(1), str(value)))
-            except (re.error, ValueError, TypeError):
-                return False
+# A single XLSForm comparison constraint, e.g. ". <= 100", ".>=0", ". = 'yes'".
+# Operators may be surrounded by any amount of whitespace, which the previous
+# implementation (matching ".<=" with no spaces) silently ignored.
+_COMPARISON_RE = re.compile(r"^\.\s*(<=|>=|!=|==|<|>|=)\s*(.+)$")
+_REGEX_RE = re.compile(r"regex\(\s*\.\s*,\s*['\"](.+)['\"]\s*\)")
 
-    if constraints.startswith(".<="):
-        threshold_str = constraints[3:].strip()
-        try:
-            threshold = float(threshold_str)
-            return float(value) <= threshold
-        except (ValueError, TypeError):
-            return False
 
-    elif constraints.startswith(".>="):
-        threshold_str = constraints[3:].strip()
-        try:
-            threshold = float(threshold_str)
-            return float(value) >= threshold
-        except (ValueError, TypeError):
-            return False
+def _validate_value(value: object, constraints: str) -> bool:
+    """Validate a single value against one XLSForm constraint expression.
 
-    elif constraints.startswith(".<"):
-        threshold_str = constraints[2:].strip()
-        try:
-            threshold = float(threshold_str)
-            return float(value) < threshold
-        except (ValueError, TypeError):
-            return False
+    Supports ``regex(., 'pattern')`` and single comparison constraints with the
+    current-value dot reference (``.``), tolerant of surrounding whitespace.
+    Unsupported/compound expressions are treated as passing rather than blocking.
 
-    elif constraints.startswith(".>"):
-        threshold_str = constraints[2:].strip()
-        try:
-            threshold = float(threshold_str)
-            return float(value) > threshold
-        except (ValueError, TypeError):
-            return False
+    Args:
+        value (object): The submitted value.
+        constraints (str): The XLSForm constraint expression.
 
-    elif constraints.startswith(".="):
-        threshold_str = constraints[2:].strip()
-        try:
-            return float(value) == float(threshold_str)
-        except (ValueError, TypeError):
-            return str(value) == threshold_str
-
-    elif constraints.startswith(".!="):
-        threshold_str = constraints[3:].strip()
-        try:
-            return float(value) != float(threshold_str)
-        except (ValueError, TypeError):
-            return str(value) != threshold_str
-
-    # Other constraints
-    else:
-        # not yet implemented
+    Returns:
+        bool: Whether the value satisfies the constraint.
+    """
+    if value is None or constraints is None:
         return True
+    constraint = str(constraints).strip()
+
+    regex_match = _REGEX_RE.search(constraint)
+    if regex_match:
+        try:
+            return bool(re.search(regex_match.group(1), str(value)))
+        except (re.error, ValueError, TypeError):
+            return False
+
+    comparison = _COMPARISON_RE.match(constraint)
+    if comparison:
+        op = comparison.group(1)
+        threshold = comparison.group(2).strip().strip("'\"")
+        try:
+            left, right = float(value), float(threshold)  # type: ignore[arg-type]
+        except (ValueError, TypeError):
+            if op in ("=", "=="):
+                return str(value) == threshold
+            if op == "!=":
+                return str(value) != threshold
+            return True  # non-numeric value with an ordering operator: don't block
+        comparisons = {
+            "<=": left <= right,
+            ">=": left >= right,
+            "<": left < right,
+            ">": left > right,
+            "=": left == right,
+            "==": left == right,
+            "!=": left != right,
+        }
+        return comparisons[op]
+
+    # Compound or unsupported expressions are not evaluated; do not block the row.
+    return True
 
 
 def _validate_column_types(
