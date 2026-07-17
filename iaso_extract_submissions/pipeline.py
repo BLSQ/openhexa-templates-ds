@@ -20,7 +20,7 @@ from openhexa.sdk import (
 from openhexa.sdk.datasets.dataset import Dataset
 from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO, dataframe
-from utils import clean_string, in_dataset_version
+from utils import clean_string, get_available_languages, in_dataset_version
 
 
 @contextmanager
@@ -31,7 +31,7 @@ def _force_string_csv_inference() -> Iterator[None]:
     # full-scan inference; final dtypes are reapplied later from form metadata.
     original = pl.read_csv
 
-    def patched(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+    def patched(*args, **kwargs):  # ruff:ignore[missing-type-args, missing-type-kwargs, missing-return-type-private-function]
         kwargs.setdefault("infer_schema_length", None)
         return original(*args, **kwargs)
 
@@ -73,6 +73,18 @@ def _force_string_csv_inference() -> Iterator[None]:
     default=True,
     required=False,
     help="Replace choice codes with labels",
+    disables=["language"],
+    disable_when=False,
+)
+@parameter(
+    "language",
+    name="Language for choice labels",
+    type=str,
+    required=False,
+    help=(
+        "Language for choice labels, only used if `Convert Choices to Labels` is enabled. "
+        "(e.g. `English`, `French`, `Português`)"
+    ),
 )
 @parameter(
     code="output_file_name",
@@ -125,6 +137,7 @@ def iaso_extract_submissions(
     ou_parent_ids: list[int] | None,
     last_updated: str | None,
     choices_to_labels: bool | None,
+    language: str | None,
     output_file_name: str | None,
     output_format: str | None,
     db_table_name: str | None,
@@ -142,7 +155,7 @@ def iaso_extract_submissions(
     submissions = fetch_submissions(
         iaso=iaso, form_id=form_id, ou_parent_ids=ou_parent_ids, cutoff_date=cutoff_date
     )
-    submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
+    submissions = process_choices(submissions, choices_to_labels, language, iaso, form_id)
     submissions = deduplicate_columns(submissions)
 
     output_file_path = export_to_file(
@@ -257,7 +270,9 @@ def fetch_submissions(
                 )
                 for parent_id in ou_parent_ids
             ]
-            return pl.concat(frames, how="diagonal_relaxed").unique(subset=["id"])
+            return pl.concat(frames, how="diagonal_relaxed").unique(
+                subset=["id"], maintain_order=True
+            )
     except Exception as exc:
         current_run.log_error(f"Submission retrieval failed: {exc}")
         raise
@@ -265,13 +280,18 @@ def fetch_submissions(
 
 # @iaso_extract_submissions.task
 def process_choices(
-    submissions: pl.DataFrame, convert: bool | None, iaso_client: IASO, form_id: int
+    submissions: pl.DataFrame,
+    convert: bool | None,
+    language: str | None,
+    iaso_client: IASO,
+    form_id: int,
 ) -> pl.DataFrame:
     """Convert choice codes to human-readable labels if requested.
 
     Args:
         submissions: Raw submissions DataFrame
         convert: Conversion flag
+        language: Language for choice labels
         iaso_client: Authenticated IASO client
         form_id: Target form identifier
 
@@ -283,9 +303,34 @@ def process_choices(
 
     try:
         form_metadata = dataframe.get_form_metadata(iaso_client, form_id)
+    except Exception as exc:
+        current_run.log_error(f"Failed to fetch form metadata: {exc}")
+        raise
+
+    available_languages = get_available_languages(form_metadata)
+
+    if available_languages:
+        current_run.log_info(f"Form choice labels available in languages: {available_languages}")
+        if not language:
+            raise ValueError(
+                "This form is multi-language; the `Language` parameter is required. "
+                f"Available languages: {available_languages}"
+            )
+        if language not in available_languages:
+            raise ValueError(
+                f"Language `{language}` is not available for this form. "
+                f"Choose one of: {available_languages}"
+            )
+    elif language:
+        current_run.log_warning(
+            "This form is single-language; the `Language` parameter is ignored."
+        )
+
+    try:
         return dataframe.replace_labels(
             submissions=submissions,
             form_metadata=form_metadata,  # type: ignore
+            language=language,
         )
     except Exception as exc:
         current_run.log_error(f"Choice conversion failed: {exc}")
@@ -380,7 +425,7 @@ def export_to_database(
         mode = mode or "replace"
         submissions.write_database(
             table_name=table_name,
-            connection=workspace.database_url,
+            connection=workspace.database_url,  # type: ignore
             if_table_exists=mode,
         )
         current_run.add_database_output(table_name)
@@ -463,8 +508,8 @@ def _validate_schema(submissions: pl.DataFrame, table_name: str) -> bool:
                 f"select column_name from information_schema.columns "
                 f"where table_name='{table_name}'"
             ),
-            uri=workspace.database_url,
-        )
+            uri=workspace.database_url,  # type: ignore
+        )  # type: ignore
         .select("column_name")
         .to_series()
         .to_list()

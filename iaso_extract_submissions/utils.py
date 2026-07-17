@@ -40,6 +40,27 @@ def sha256_of_file(file_path: Path) -> str:
     return hasher.hexdigest()
 
 
+def get_available_languages(form_metadata: dict) -> list[str]:
+    """Collect the label languages declared across a form's choice lists.
+
+    Args:
+        form_metadata (dict): Metadata as returned by ``dataframe.get_form_metadata``,
+            keyed by form version, each holding ``questions`` and ``choices``.
+
+    Returns:
+        list[str]: Sorted, de-duplicated language keys found in the choice labels.
+        Empty for single-language forms.
+    """
+    languages: set[str] = set()
+    for version in form_metadata.values():
+        for choices in version.get("choices", {}).values():
+            for choice in choices:
+                label = choice.get("label")
+                if isinstance(label, dict):
+                    languages.update(label.keys())
+    return sorted(languages)
+
+
 def in_dataset_version(file_path: Path, dataset_version: DatasetVersion) -> bool:
     """Check if a file is in the specified dataset version.
 

@@ -11,12 +11,14 @@ from pipeline import (
     authenticate_iaso,
     clean_string,
     fetch_submissions,
+    get_available_languages,
     get_form_name,
     parse_cutoff_date,
+    process_choices,
 )
 
 
-class FakeIASOConnection:  # noqa: B903
+class FakeIASOConnection:  # ruff:ignore[class-as-data-structure]
     """Simple fake IASOConnection for testing."""
 
     def __init__(
@@ -101,7 +103,7 @@ class FakeResponse:
     def __init__(self, payload: dict):
         self._payload = payload
 
-    def json(self):  # noqa: ANN201, D102
+    def json(self):  # ruff:ignore[missing-return-type-undocumented-public-function, undocumented-public-method]
         return self._payload
 
 
@@ -131,7 +133,7 @@ def test_get_form_name_missing_name_field():
     iaso.api_client.get.return_value = FakeResponse({})
 
     with patch("pipeline.current_run") as mock_current_run:
-        with pytest.raises(ValueError):  # noqa: PT011
+        with pytest.raises(ValueError):  # ruff:ignore[pytest-raises-too-broad]
             get_form_name(iaso, form_id=456)
 
         mock_current_run.log_error.assert_called_once()
@@ -143,7 +145,7 @@ def test_get_form_name_api_failure():
     iaso.api_client.get.side_effect = Exception("404 Not Found")
 
     with patch("pipeline.current_run") as mock_current_run:
-        with pytest.raises(ValueError) as excinfo:  # noqa: PT011
+        with pytest.raises(ValueError) as excinfo:  # ruff:ignore[pytest-raises-too-broad]
             get_form_name(iaso, form_id=999)
 
         mock_current_run.log_error.assert_called_once()
@@ -195,7 +197,7 @@ def test_parse_cutoff_date_none_or_empty(input_date: str):
 def test_parse_cutoff_date_invalid_format(input_date: str):
     """Should log error and raise ValueError for invalid date strings."""
     with patch("pipeline.current_run") as mock_current_run:
-        with pytest.raises(ValueError) as excinfo:  # noqa: PT011
+        with pytest.raises(ValueError) as excinfo:  # ruff:ignore[pytest-raises-too-broad]
             parse_cutoff_date(input_date)
 
         mock_current_run.log_error.assert_called_once_with(
@@ -330,3 +332,182 @@ def test_fetch_submissions_failure():
             f"Fetching submissions for form ID {form_id}"
         )
         mock_current_run.log_error.assert_called_once()
+
+
+# -------------------------------------------------------------------
+# get_available_languages tests
+# -------------------------------------------------------------------
+
+
+def _multilang_metadata() -> dict:
+    """Form metadata for a two-language form (choice labels are dicts).
+
+    Returns:
+        dict: Metadata whose choice labels are ``{language: label}`` mappings.
+    """
+    return {
+        1: {
+            "questions": {},
+            "choices": {
+                "yes_no": [
+                    {"name": "yes", "label": {"English": "Yes", "French": "Oui"}},
+                    {"name": "no", "label": {"English": "No", "French": "Non"}},
+                ]
+            },
+        }
+    }
+
+
+def _singlelang_metadata() -> dict:
+    """Form metadata for a single-language form (choice labels are strings).
+
+    Returns:
+        dict: Metadata whose choice labels are plain strings.
+    """
+    return {
+        1: {
+            "questions": {},
+            "choices": {"yes_no": [{"name": "yes", "label": "Yes"}]},
+        }
+    }
+
+
+def test_get_available_languages_multilang():
+    """Should return the sorted union of label keys across choices."""
+    assert get_available_languages(_multilang_metadata()) == ["English", "French"]
+
+
+def test_get_available_languages_single_language_returns_empty():
+    """Single-language forms use string labels and declare no language."""
+    assert get_available_languages(_singlelang_metadata()) == []
+
+
+def test_get_available_languages_unions_across_versions():
+    """Languages are collected across all versions and de-duplicated."""
+    metadata = {
+        1: {"choices": {"a": [{"name": "x", "label": {"English": "X"}}]}},
+        2: {"choices": {"b": [{"name": "y", "label": {"English": "Y", "Português": "Y"}}]}},
+    }
+    assert get_available_languages(metadata) == ["English", "Português"]
+
+
+def test_get_available_languages_handles_missing_label_and_choices():
+    """Choices without a label dict (or missing keys) are ignored, not crashed on."""
+    metadata = {
+        1: {"choices": {"a": [{"name": "x"}, {"name": "y", "label": None}]}},
+        2: {},
+    }
+    assert get_available_languages(metadata) == []
+
+
+# -------------------------------------------------------------------
+# process_choices tests
+# -------------------------------------------------------------------
+
+
+def test_process_choices_convert_disabled_returns_input_untouched():
+    """When conversion is off, submissions are returned as-is with no API call."""
+    submissions = pl.DataFrame({"id": [1]})
+
+    with patch("pipeline.dataframe.get_form_metadata") as mock_meta:
+        result = process_choices(
+            submissions, convert=False, language=None, iaso_client=MagicMock(), form_id=1
+        )
+
+        assert result is submissions
+        mock_meta.assert_not_called()
+
+
+def test_process_choices_multilang_valid_language():
+    """A valid language logs the available list and calls replace_labels."""
+    submissions = pl.DataFrame({"id": [1]})
+    labelled = pl.DataFrame({"id": [1], "q": ["Yes"]})
+
+    with (
+        patch("pipeline.dataframe.get_form_metadata", return_value=_multilang_metadata()),
+        patch("pipeline.dataframe.replace_labels", return_value=labelled) as mock_replace,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
+        result = process_choices(
+            submissions, convert=True, language="French", iaso_client=MagicMock(), form_id=1
+        )
+
+        assert result is labelled
+        mock_replace.assert_called_once()
+        assert mock_replace.call_args.kwargs["language"] == "French"
+        mock_current_run.log_info.assert_called_once()
+
+
+def test_process_choices_multilang_missing_language_raises():
+    """A multi-language form without a language raises before calling replace_labels."""
+    with (
+        patch("pipeline.dataframe.get_form_metadata", return_value=_multilang_metadata()),
+        patch("pipeline.dataframe.replace_labels") as mock_replace,
+        patch("pipeline.current_run"),
+    ):
+        with pytest.raises(ValueError, match="multi-language"):
+            process_choices(
+                pl.DataFrame({"id": [1]}),
+                convert=True,
+                language=None,
+                iaso_client=MagicMock(),
+                form_id=1,
+            )
+
+        mock_replace.assert_not_called()
+
+
+def test_process_choices_multilang_unknown_language_raises_with_available():
+    """An unavailable language raises, surfacing the available languages."""
+    with (
+        patch("pipeline.dataframe.get_form_metadata", return_value=_multilang_metadata()),
+        patch("pipeline.dataframe.replace_labels") as mock_replace,
+        patch("pipeline.current_run"),
+    ):
+        with pytest.raises(ValueError, match="English"):
+            process_choices(
+                pl.DataFrame({"id": [1]}),
+                convert=True,
+                language="Spanish",
+                iaso_client=MagicMock(),
+                form_id=1,
+            )
+
+        mock_replace.assert_not_called()
+
+
+def test_process_choices_single_language_ignores_language_with_warning():
+    """A single-language form warns that the language is ignored, then converts."""
+    submissions = pl.DataFrame({"id": [1]})
+
+    with (
+        patch("pipeline.dataframe.get_form_metadata", return_value=_singlelang_metadata()),
+        patch("pipeline.dataframe.replace_labels", return_value=submissions) as mock_replace,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
+        process_choices(
+            submissions, convert=True, language="French", iaso_client=MagicMock(), form_id=1
+        )
+
+        mock_current_run.log_warning.assert_called_once()
+        mock_replace.assert_called_once()
+
+
+def test_process_choices_metadata_fetch_failure_raises():
+    """A metadata fetch error is logged and re-raised without touching replace_labels."""
+    with (
+        patch("pipeline.dataframe.get_form_metadata", side_effect=RuntimeError("boom")),
+        patch("pipeline.dataframe.replace_labels") as mock_replace,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
+        with pytest.raises(RuntimeError):
+            process_choices(
+                pl.DataFrame({"id": [1]}),
+                convert=True,
+                language="French",
+                iaso_client=MagicMock(),
+                form_id=1,
+            )
+
+        mock_current_run.log_error.assert_called_once()
+        mock_replace.assert_not_called()
