@@ -1,3 +1,4 @@
 psycopg2-binary
 connectorx
 openhexa.toolbox~=2.11.1
+openhexa.sdk>=2.22.2
