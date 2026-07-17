@@ -15,6 +15,7 @@ from iaso_client import (
     get_form_name,
     get_token_headers,
     get_user_id_from_jwt,
+    same_host,
     validate_user_roles,
 )
 from iaso_io import read_submissions_file
@@ -38,30 +39,6 @@ CAST_MAP = {
     "Float64": pl.Float64,
     "Boolean": pl.Boolean,
 }
-
-
-def _same_host(iaso: IASO, netloc: str) -> bool:
-    """Return whether a network location matches the IASO server host.
-
-    Used to decide if the IASO bearer token may be forwarded to a submission
-    endpoint. When the IASO host cannot be determined, the previous behaviour
-    (forwarding the token) is preserved to avoid breaking existing setups.
-
-    Args:
-        iaso (IASO): The authenticated IASO client.
-        netloc (str): The target host (``host:port``) to compare against.
-
-    Returns:
-        bool: True if hosts match or the IASO host is unknown.
-    """
-    base_url = ""
-    for attr in ("server_url", "url", "base_url"):
-        base_url = str(getattr(iaso.api_client, attr, "") or "")
-        if base_url:
-            break
-    if not base_url:
-        return True
-    return urlparse(base_url).netloc == netloc
 
 
 @pipeline("iaso_import_submissions")
@@ -316,7 +293,7 @@ def handle_delete_mode(iaso: IASO, df: pl.DataFrame, headers: dict) -> dict[str,
         raise RuntimeError(msg)
 
     for record in df.iter_rows(named=True):
-        try:
+        try:  # ruff:ignore[too-many-statements-in-try-clause]
             record_id = record.get("id")
             if record_id is None:
                 current_run.log_error("Skipping record with missing 'id' column value")
@@ -379,7 +356,7 @@ def handle_create_mode(
     headers = get_token_headers(iaso)
 
     for record in df.iter_rows(named=True):
-        try:
+        try:  # ruff:ignore[too-many-statements-in-try-clause]
             is_valid, xml_template = _select_template_and_is_valid(
                 record=record,
                 df=df,
@@ -512,7 +489,7 @@ def handle_update_mode(
     token = headers.get("Authorization", "").removeprefix("Bearer ")
     user_id = get_user_id_from_jwt(token)
     for record in df.iter_rows(named=True):
-        try:
+        try:  # ruff:ignore[too-many-statements-in-try-clause]
             is_valid, xml_template = _select_template_and_is_valid(
                 record=record,
                 df=df,
@@ -604,7 +581,7 @@ def handle_update_mode(
 
             # Only forward the IASO bearer token when the Enketo submission host
             # is the same as the IASO host; otherwise avoid leaking it cross-host.
-            submission_headers = headers if _same_host(iaso, edit_url.netloc) else {}
+            submission_headers = headers if same_host(iaso, edit_url.netloc) else {}
 
             with file_path.open("rb") as fp:
                 files = {"xml_submission_file": (file_path.name, fp, "application/xml")}

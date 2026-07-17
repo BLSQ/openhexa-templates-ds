@@ -170,7 +170,7 @@ def validate_data_structure(
     missing_required = required_columns - current_columns
 
     if missing_required:
-        # Généralement ce sont les informations sur les hint qui ne figure pas dans le fichier d'importation  # noqa: E501
+        # Généralement ce sont les informations sur les hint qui ne figure pas dans le fichier d'importation  # ruff:ignore[line-too-long]
         result.is_valid = False
         result.missing_columns.extend(missing_required)
         result.errors.append(
@@ -448,7 +448,7 @@ def _validate_value(value: object, constraints: str) -> bool:
 def _validate_column_types(
     df: pl.DataFrame, type_requirements: dict, import_strategy: str
 ) -> dict[str, tuple[str, str]]:
-    """Validates column types with flexibility."""  # noqa: DOC201
+    """Validates column types with flexibility."""  # ruff:ignore[docstring-missing-returns]
     invalid_types = {}
     schema = df.schema
 
