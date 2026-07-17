@@ -487,7 +487,10 @@ def _process_submissions(submissions: pl.DataFrame) -> pl.DataFrame:
     if binary_exprs:
         submissions = submissions.with_columns(binary_exprs)
 
-    submissions = submissions.drop(list_cols).select(pl.exclude("instanceid"), pl.col("instanceid"))
+    submissions = submissions.drop(list_cols)
+
+    if "instanceid" in submissions.columns:
+        submissions = submissions.select(pl.exclude("instanceid"), pl.col("instanceid"))
 
     return submissions.select(sorted(submissions.columns)).sort(submissions.columns)
 
