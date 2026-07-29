@@ -20,8 +20,9 @@ This pipeline extracts analytics data from a DHIS2 instance, including data elem
 | Organisation units | List of String | No | - | Organisation units to include |
 | Organisation unit groups | List of String | No | - | Organisation unit groups to include |
 | Organisation unit levels | List of String | No | - | Organisation unit levels to include |
-| Start period | String | Yes | - | Start period for the extraction (DHIS2 format) |
-| End period | String | No | Current period | End period for the extraction (DHIS2 format) |
+| Start period | String | No | - | Start period for the extraction (DHIS2 format). If not provided, it will be calculated as end period - period. |
+| End period | String | No | Current period | End period for the extraction (DHIS2 format). Required when start period is not provided. |
+| Number of months to extract | Integer | No | - | If no start period is provided, it will be calculated as end period - period. End period must also be provided. |
 | Output file | String | No | Auto-generated | Custom output file path in workspace |
 | Output dataset | Dataset | No | - | OpenHEXA dataset. A new version will be created if new content is detected |
 | Output DB table | String | No | - | Database table name for storing the extracted data |
@@ -120,7 +121,8 @@ flowchart TB
     C2 --> D
     C3 --> D
     C4 --> D
-    D --> E[Extract analytics data]
+    D --> P[Validate and resolve periods]
+    P --> E[Extract analytics data]
     E --> F[Join metadata]
     F --> H[Validate output data]
     H --> I[Write to Parquet file]

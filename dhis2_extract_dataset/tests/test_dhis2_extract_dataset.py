@@ -1,6 +1,6 @@
 import re
 import sys
-from datetime import datetime
+from datetime import date
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -13,8 +13,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from pipeline import (
     add_ds_information,
+    check_dates,
     drop_null_values_with_comment,
     get_dataelements_with_no_data,
+    get_dates,
     get_descendants,
     get_periods_with_no_data,
     isodate_to_period_type,
@@ -49,9 +51,86 @@ def test_valid_date():
         ):
             valid_date(invalid_date_str)
 
-    return_date = valid_date(None)
-    assert return_date == datetime.now().strftime("%Y-%m-%d")
-    assert isinstance(return_date, str)
+
+def test_check_dates(monkeypatch: pytest.MonkeyPatch):
+    """Test check_dates function.
+
+    We test:
+    (1) Raises ValueError when neither start nor period is provided.
+    (2) Raises ValueError when period is not greater than 0.
+    (3) Raises ValueError when start is after end.
+    (4) Valid combinations do not raise.
+    """
+    mock_run = MagicMock()
+    monkeypatch.setattr("pipeline.run", mock_run)
+
+    with pytest.raises(
+        ValueError, match=re.escape("Either start date or period must be provided.")
+    ):
+        check_dates(None, None, None)
+
+    with pytest.raises(
+        ValueError, match=re.escape("Either start date or period must be provided.")
+    ):
+        check_dates(None, "2025-01-31", None)
+
+    with pytest.raises(ValueError, match=re.escape("Period must be greater than 0.")):
+        check_dates(None, "2025-06-01", 0)
+
+    with pytest.raises(ValueError, match=re.escape("Period must be greater than 0.")):
+        check_dates(None, "2025-06-01", -1)
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("Start date 2025-06-01 must not be after end date 2025-01-01."),
+    ):
+        check_dates("2025-06-01", "2025-01-01", None)
+
+    # Valid: start provided without period
+    check_dates("2025-01-01", None, None)
+
+    # Valid: period provided without start
+    check_dates(None, "2025-06-01", 3)
+
+    # Valid: both start and period provided, start <= end
+    check_dates("2025-01-01", "2025-06-01", 3)
+
+
+def test_get_dates(monkeypatch: pytest.MonkeyPatch):
+    """Test get_dates function.
+
+    We test:
+    (1) When end is None, today's date is used.
+    (2) When start is None, it is calculated as end - period months.
+    (3) When both are provided, they are returned as-is.
+    """
+    mock_run = MagicMock()
+    monkeypatch.setattr("pipeline.run", mock_run)
+
+    fixed_today = date(2025, 6, 1)
+    mock_date = MagicMock()
+    mock_date.today.return_value = fixed_today
+    monkeypatch.setattr("pipeline.date", mock_date)
+
+    # When end is None, today's date is used
+    start, end = get_dates("2025-01-01", None, None)
+    assert end == "2025-06-01"
+    assert start == "2025-01-01"
+
+    # When start is None, it is calculated as end - period months
+    start, end = get_dates(None, "2025-06-01", 3)
+    assert start == "2025-03-01"
+    assert end == "2025-06-01"
+
+    # When only period is provided, end defaults to today and start is calculated
+    start, end = get_dates(None, None, 3)
+    assert end == "2025-06-01"
+    assert start == "2025-03-01"
+
+    # When both are provided, they are returned as-is
+    start, end = get_dates("2025-01-01", "2025-06-01", None)
+    assert start == "2025-01-01"
+    assert end == "2025-06-01"
 
 
 def test_validate_ous_parameters():
@@ -70,7 +149,9 @@ def test_validate_ous_parameters():
         validate_ous_parameters(config.valid_ous, config.valid_ou_groups)
     with pytest.raises(
         ValueError,
-        match=re.escape("Please provide either (1) Orgunits or (2) Group(s) of orgunits"),
+        match=re.escape(
+            "Please provide either (1) Orgunits or (2) Group(s) of orgunits"
+        ),
     ):
         validate_ous_parameters(config.empty_ous, config.empty_ou_groups)
 
@@ -169,7 +250,9 @@ def test_get_descendants():
     parent_ous = ["ou1", "ou3"]
     result = get_descendants(parent_ous, include_children=False, pyramid=config.pyramid)
     assert result == parent_ous
-    result = get_descendants(["ou4", "ou10"], include_children=True, pyramid=config.pyramid)
+    result = get_descendants(
+        ["ou4", "ou10"], include_children=True, pyramid=config.pyramid
+    )
     expected = ["ou4", "ou7", "ou8", "ou11", "ou12", "ou13", "ou10", "ou15", "ou16"]
     result = sorted(result)
     expected = sorted(expected)
@@ -190,7 +273,9 @@ def test_isodate_to_period_type():
         assert isinstance(period_obj, Period)
         assert str(period_obj) == expected_str, f"Failed for {period_type}"
 
-    with pytest.raises(ValueError, match="Unsupported DHIS2 period type: UnsupportedType"):
+    with pytest.raises(
+        ValueError, match="Unsupported DHIS2 period type: UnsupportedType"
+    ):
         isodate_to_period_type(config.date_str, "UnsupportedType")
 
 
@@ -210,7 +295,9 @@ def test_drop_null_values_with_comment(monkeypatch: pytest.MonkeyPatch):
 
     assert isinstance(result, pl.DataFrame)
     assert result.equals(config.df_after_drop_nulls_with_comment)
-    mock_run.log_info.assert_called_once_with("Dropped 1 rows with null value and a comment")
+    mock_run.log_info.assert_called_once_with(
+        "Dropped 1 rows with null value and a comment"
+    )
 
 
 def test_set_date_range_delta():

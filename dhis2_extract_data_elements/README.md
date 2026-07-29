@@ -19,8 +19,9 @@ This pipeline extracts data values from a DHIS2 instance for specified data elem
 | Organisation units | List of String | No | - | IDs of organisation units to extract data from |
 | Organisation unit groups | List of String | No | - | IDs of organisation unit groups to extract data from |
 | Include children | Boolean | No | `False` | Whether to include children of the selected organisation units |
-| Start date | String | Yes | - | Start date for the extraction (YYYY-MM-DD) |
-| End date | String | No | Today | End date for the extraction (YYYY-MM-DD) |
+| Start date | String | No | - | Start date for the extraction (YYYY-MM-DD). If not provided, it will be calculated as end date - period. |
+| End date | String | No | Today | End date for the extraction (YYYY-MM-DD). |
+| Number of months to extract | int | No | - | If no start date is provided, the start date will be calculated as the end date minus this number of months. |
 | Output file | String | No | Auto-generated | Custom output file path in workspace |
 | Output dataset | Dataset | No | - | OpenHEXA dataset. A new version will be created if new content is detected |
 | Output DB table | String | No | - | Database table name for storing the extracted data |
@@ -39,8 +40,8 @@ The extraction parameters can either be set individually through the pipeline
 parameters, **or** provided together as a single JSON file through the
 `Configuration file` parameter. When a configuration file is provided, the
 extraction parameters (Data elements, Data element groups, Organisation units,
-Organisation unit groups, Start date, End date) must be left empty — otherwise
-the pipeline stops with an error.
+Organisation unit groups, Start date, End date, Number of months to extract)
+must be left empty — otherwise the pipeline stops with an error.
 
 The `Include children` toggle is the exception: it is not part of that check.
 When a configuration file is provided, the `include_children` value from the
@@ -56,8 +57,11 @@ request must still satisfy the dimension rules above):
 | `organisation_units` | List of String | IDs of organisation units to extract data from |
 | `organisation_unit_groups` | List of String | IDs of organisation unit groups to extract data from |
 | `include_children` | Boolean | Whether to include children of the selected organisation units (default `false`) |
-| `start_date` | String | Start date for the extraction (YYYY-MM-DD) |
+| `start_date` | String | Start date for the extraction (YYYY-MM-DD). If not provided, it is calculated as end date - `period` |
 | `end_date` | String | End date for the extraction (YYYY-MM-DD, today by default) |
+| `period` | Integer | Number of months to extract. Only used if `start_date` is not provided |
+
+Either `start_date` or `period` must be provided.
 
 Example `config.json`:
 
@@ -68,6 +72,18 @@ Example `config.json`:
   "include_children": false,
   "start_date": "2024-01-01",
   "end_date": "2024-12-31"
+}
+```
+
+Example `config.json` using a relative period, here extracting the last 3
+months up to today:
+
+```json
+{
+  "data_elements": ["pikOziyCXbM", "x3Do5e7g4Qo"],
+  "organisation_units": ["vELbGdEphPd"],
+  "include_children": false,
+  "period": 3
 }
 ```
 
@@ -145,7 +161,8 @@ If the validation fails, the pipeline raises an error and stops execution.
 }%%
 flowchart TD
     A[Connect to DHIS2]
-    A --> C[Fetch metadata]
+    A --> B[Validate and resolve dates]
+    B --> C[Fetch metadata]
     C --> C1[Data Elements]
     C --> C2[Indicators]
     C --> C3[Organisation Units]
