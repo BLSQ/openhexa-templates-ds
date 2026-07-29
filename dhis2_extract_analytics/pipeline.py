@@ -108,7 +108,7 @@ from validate import validate_data
     code="start_period",
     type=str,
     name="Start period",
-    help="Start period for the extraction (DHIS2 format). "
+    help="Start period for the extraction (DHIS2 format -- e.g, YYYYMM, YYYYWNN). "
     "If not provided, it will be calculated as end_period - period.",
     required=False,
 )
@@ -116,7 +116,7 @@ from validate import validate_data
     code="end_period",
     type=str,
     name="End period",
-    help="End period for the extraction (DHIS2 format). "
+    help="End period for the extraction (DHIS2 format -- e.g, YYYYMM, YYYYWNN). "
     "Latest period of the same type as start_period by default."
     " Required when start_period is not provided.",
     required=False,
