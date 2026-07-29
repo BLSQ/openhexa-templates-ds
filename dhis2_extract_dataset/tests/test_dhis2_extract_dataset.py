@@ -14,11 +14,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from pipeline import (
     add_ds_information,
     check_dates,
+    drop_null_values_with_comment,
     get_dataelements_with_no_data,
     get_dates,
     get_descendants,
     get_periods_with_no_data,
     isodate_to_period_type,
+    set_date_range_delta,
     valid_date,
     validate_ous_parameters,
 )
@@ -147,7 +149,9 @@ def test_validate_ous_parameters():
         validate_ous_parameters(config.valid_ous, config.valid_ou_groups)
     with pytest.raises(
         ValueError,
-        match=re.escape("Please provide either (1) Orgunits or (2) Group(s) of orgunits"),
+        match=re.escape(
+            "Please provide either (1) Orgunits or (2) Group(s) of orgunits"
+        ),
     ):
         validate_ous_parameters(config.empty_ous, config.empty_ou_groups)
 
@@ -246,7 +250,9 @@ def test_get_descendants():
     parent_ous = ["ou1", "ou3"]
     result = get_descendants(parent_ous, include_children=False, pyramid=config.pyramid)
     assert result == parent_ous
-    result = get_descendants(["ou4", "ou10"], include_children=True, pyramid=config.pyramid)
+    result = get_descendants(
+        ["ou4", "ou10"], include_children=True, pyramid=config.pyramid
+    )
     expected = ["ou4", "ou7", "ou8", "ou11", "ou12", "ou13", "ou10", "ou15", "ou16"]
     result = sorted(result)
     expected = sorted(expected)
@@ -267,5 +273,49 @@ def test_isodate_to_period_type():
         assert isinstance(period_obj, Period)
         assert str(period_obj) == expected_str, f"Failed for {period_type}"
 
-    with pytest.raises(ValueError, match="Unsupported DHIS2 period type: UnsupportedType"):
+    with pytest.raises(
+        ValueError, match="Unsupported DHIS2 period type: UnsupportedType"
+    ):
         isodate_to_period_type(config.date_str, "UnsupportedType")
+
+
+def test_drop_null_values_with_comment(monkeypatch: pytest.MonkeyPatch):
+    """Test drop_null_values_with_comment function.
+
+    We test:
+    (1) Rows with null value and a comment are dropped.
+    (2) Rows with null value and no comment are kept.
+    (3) Rows with a non-null value are kept regardless of comment.
+    (4) The drop count is logged when rows are removed.
+    """
+    mock_run = MagicMock()
+    monkeypatch.setattr("pipeline.run", mock_run)
+
+    result = drop_null_values_with_comment(config.df_with_nulls)
+
+    assert isinstance(result, pl.DataFrame)
+    assert result.equals(config.df_after_drop_nulls_with_comment)
+    mock_run.log_info.assert_called_once_with(
+        "Dropped 1 rows with null value and a comment"
+    )
+
+
+def test_set_date_range_delta():
+    """Test set_date_range_delta function.
+
+    We test:
+    (1) Daily -> 1 month. Daily uses datetime.timedelta internally (not relativedelta),
+        and must be capped to 1 month.
+    (2) Weekly variants (Monday-Sunday) -> 1 month. These use relativedelta(weeks=1),
+        which is shorter than a month and must be capped.
+    (3) Monthly -> 1 month. Exactly at the threshold, no change.
+    (4) Longer period types (BiMonthly, Quarterly, SixMonthly, Yearly, Financial variants)
+        -> DATE_RANGE_DELTA matches the period's natural duration.
+    """
+    for period, expected_delta in config.period_delta_cases:
+        mock_dhis = MagicMock()
+        set_date_range_delta(mock_dhis, period)
+        assert expected_delta == mock_dhis.data_value_sets.DATE_RANGE_DELTA, (
+            f"Failed for {type(period).__name__}: expected {expected_delta}, "
+            f"got {mock_dhis.data_value_sets.DATE_RANGE_DELTA}"
+        )

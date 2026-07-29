@@ -1,15 +1,23 @@
 import base64
 import hashlib
+import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 import polars as pl
 import requests
 from dateutil import relativedelta
-from openhexa.sdk import DHIS2Connection, current_run, parameter, pipeline, workspace
+from openhexa.sdk import (
+    DHIS2Connection,
+    File,
+    current_run,
+    parameter,
+    pipeline,
+    workspace,
+)
 from openhexa.sdk.datasets.dataset import Dataset, DatasetVersion
 from openhexa.sdk.pipelines.parameter import DHIS2Widget
 from openhexa.toolbox.dhis2 import DHIS2
@@ -55,6 +63,18 @@ run = current_run or LocalRun()
     type=DHIS2Connection,
     name="Source DHIS2 instance",
     help="The DHIS2 instance to extract data elements from",
+)
+@parameter(
+    code="config_file_file",
+    type=File,
+    name="Configuration file",
+    help=(
+        "Optional JSON file holding the extraction parameters (data_elements, "
+        "data_element_groups, organisation_units, organisation_unit_groups, "
+        "include_children, start_date, end_date, period). If provided, none of the "
+        "extraction parameters below may be set."
+    ),
+    required=False,
 )
 @parameter(
     code="data_elements",
@@ -147,6 +167,7 @@ run = current_run or LocalRun()
 )
 def dhis2_extract_data_elements(
     src_dhis2: DHIS2Connection,
+    config_file_file: File | None = None,
     start_date: str | None = None,
     data_elements: list[str] | None = None,
     data_element_groups: list[str] | None = None,
@@ -170,18 +191,31 @@ def dhis2_extract_data_elements(
     if not organisation_unit_groups:
         organisation_unit_groups = None
 
+    if config_file_file:
+        raise_if_parameters_set(
+            data_elements,
+            data_element_groups,
+            organisation_units,
+            organisation_unit_groups,
+            start_date,
+            end_date,
+            period,
+        )
+        config = read_json(path=Path(config_file_file.path))
+        params, start_date, end_date, period = extract_params_from_config(config=config)
+
+    else:
+        params = RequestParams(
+            data_elements=data_elements,
+            data_element_groups=data_element_groups,
+            organisation_units=organisation_units,
+            organisation_unit_groups=organisation_unit_groups,
+            include_children=include_children,
+        )
+
     check_dates(start_date, end_date, period)
     start_date, end_date = get_dates(start_date, end_date, period)
-
-    params = RequestParams(
-        data_elements=data_elements,
-        data_element_groups=data_element_groups,
-        organisation_units=organisation_units,
-        organisation_unit_groups=organisation_unit_groups,
-        include_children=include_children,
-        start_date=start_date,
-        end_date=end_date,
-    )
+    params = replace(params, start_date=start_date, end_date=end_date)
 
     validate_parameters(params=params)
     meta = extract_metadata(dhis2_connection=src_dhis2)
@@ -208,12 +242,13 @@ class Metadata:
     category_option_combos: pl.DataFrame
 
 
-@dataclass
+@dataclass(frozen=True)
 class RequestParams:
     """Parameters for data extraction request.
 
     Combined into a single dataclass because they are easier to pass around
-    and are pickleable for task inputs.
+    and are pickleable for task inputs. Frozen, so the resolved dates are
+    attached with dataclasses.replace() rather than by mutation.
     """
 
     data_elements: list[str] | None
@@ -221,8 +256,111 @@ class RequestParams:
     organisation_units: list[str] | None
     organisation_unit_groups: list[str] | None
     include_children: bool
-    start_date: str
-    end_date: str | None
+    start_date: str | None = None
+    end_date: str | None = None
+
+
+def extract_params_from_config(
+    config: dict,
+) -> tuple[RequestParams, str | None, str | None, int | None]:
+    """Extract parameters from a configuration dictionary.
+
+    The start and end dates are returned unresolved, together with the period,
+    so that the caller can resolve them the same way as for the pipeline
+    parameters.
+
+    Args:
+        config: Configuration dictionary.
+
+    Returns:
+        Tuple of the extracted request parameters (without dates), the start
+        date, the end date and the period.
+    """
+    params = RequestParams(
+        data_elements=config.get("data_elements"),
+        data_element_groups=config.get("data_element_groups"),
+        organisation_units=config.get("organisation_units"),
+        organisation_unit_groups=config.get("organisation_unit_groups"),
+        include_children=config.get("include_children", False),
+    )
+    return (
+        params,
+        config.get("start_date"),
+        config.get("end_date"),
+        config.get("period"),
+    )
+
+
+def read_json(path: Path) -> dict:
+    """Read a JSON file and return its content as a dictionary.
+
+    Args:
+        path: Path to the JSON file.
+
+    Returns:
+        Dictionary containing the JSON file content.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the file does not contain valid JSON.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        msg = f"Configuration file '{path}' was not found."
+        run.log_error(msg)
+        raise FileNotFoundError(msg) from None
+    except json.JSONDecodeError as e:
+        msg = f"Configuration file '{path}' is not valid JSON: {e}"
+        run.log_error(msg)
+        raise ValueError(msg) from e
+    except Exception as e:
+        msg = f"Unexpected error while reading the file '{path}': {e}"
+        run.log_error(msg)
+        raise Exception(msg) from e
+
+
+def raise_if_parameters_set(
+    data_elements: list[str] | None,
+    data_element_groups: list[str] | None,
+    organisation_units: list[str] | None,
+    organisation_unit_groups: list[str] | None,
+    start_date: str | None,
+    end_date: str | None,
+    period: int | None,
+) -> None:
+    """Raise if any extraction parameter is set when a config file is used.
+
+    Args:
+        data_elements: List of data elements.
+        data_element_groups: List of data element groups.
+        organisation_units: List of organisation units.
+        organisation_unit_groups: List of organisation unit groups.
+        start_date: Start date for data extraction.
+        end_date: End date for data extraction.
+        period: Number of months to extract.
+
+    Raises:
+        ValueError: If any extraction parameter is set.
+    """
+    if any(
+        [
+            data_elements,
+            data_element_groups,
+            organisation_units,
+            organisation_unit_groups,
+            start_date,
+            end_date,
+            period,
+        ]
+    ):
+        msg = (
+            "When a configuration file is provided, no other parameters may be set. "
+            "Please remove the other parameters or do not provide a configuration file."
+        )
+        run.log_error(msg)
+        raise ValueError(msg)
 
 
 @dhis2_extract_data_elements.task
@@ -265,6 +403,11 @@ def validate_parameters(
         ValueError: If any parameter is invalid.
 
     """
+    if not params.start_date:
+        msg = "Start date is required"
+        run.log_error(msg)
+        raise ValueError(msg)
+
     if not is_iso_date(params.start_date):
         msg = f"Start date '{params.start_date}' is not in ISO format (YYYY-MM-DD)"
         run.log_error(msg)
@@ -337,8 +480,10 @@ def extract_data(
             org_units=params.organisation_units,  # type: ignore
             org_unit_groups=params.organisation_unit_groups,  # type: ignore
             include_children=params.include_children,
-            start_date=datetime.fromisoformat(params.start_date),
-            end_date=datetime.fromisoformat(params.end_date) if params.end_date else None,
+            start_date=datetime.fromisoformat(params.start_date),  # type: ignore
+            end_date=datetime.fromisoformat(params.end_date)
+            if params.end_date
+            else None,
         )
 
     elif params.data_element_groups:
@@ -348,8 +493,10 @@ def extract_data(
             org_units=params.organisation_units,  # type: ignore
             org_unit_groups=params.organisation_unit_groups,  # type: ignore
             include_children=params.include_children,
-            start_date=datetime.fromisoformat(params.start_date),
-            end_date=datetime.fromisoformat(params.end_date) if params.end_date else None,
+            start_date=datetime.fromisoformat(params.start_date),  # type: ignore
+            end_date=datetime.fromisoformat(params.end_date)
+            if params.end_date
+            else None,
         )
 
     else:
@@ -399,12 +546,18 @@ def validate(df: pl.DataFrame) -> None:
     """
     run.log_info("Validating extracted dataframe")
     expected_columns: list[ExpectedColumn] = [
-        ExpectedColumn(name="data_element_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(
+            name="data_element_id", type=pl.String, not_null=True, n_chars=11
+        ),
         ExpectedColumn(name="data_element_name", type=pl.String),
-        ExpectedColumn(name="category_option_combo_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(
+            name="category_option_combo_id", type=pl.String, not_null=True, n_chars=11
+        ),
         ExpectedColumn(name="category_option_combo_name", type=pl.String),
         ExpectedColumn(name="attribute_option_combo_id", type=pl.String, n_chars=11),
-        ExpectedColumn(name="organisation_unit_id", type=pl.String, not_null=True, n_chars=11),
+        ExpectedColumn(
+            name="organisation_unit_id", type=pl.String, not_null=True, n_chars=11
+        ),
         ExpectedColumn(name="period", type=pl.String, not_null=True),
         ExpectedColumn(name="value", type=pl.String),
         ExpectedColumn(name="created", type=pl.Datetime, not_null=True),
@@ -413,9 +566,13 @@ def validate(df: pl.DataFrame) -> None:
 
     for lvl in range(1, 10):
         name = f"level_{lvl}_id"
-        expected_columns.append(ExpectedColumn(name=name, type=pl.String, required=False))
+        expected_columns.append(
+            ExpectedColumn(name=name, type=pl.String, required=False)
+        )
         name = f"level_{lvl}_name"
-        expected_columns.append(ExpectedColumn(name=name, type=pl.String, required=False))
+        expected_columns.append(
+            ExpectedColumn(name=name, type=pl.String, required=False)
+        )
 
     try:
         validate_dataframe(df=df, expected_columns=expected_columns)
@@ -462,7 +619,9 @@ def write_to_dataset(df: pl.DataFrame, ds: Dataset) -> None:
 
     if ds.latest_version is not None:
         if in_dataset_version(file=dst_file, dataset_version=ds.latest_version):
-            run.log_info("File is already in the dataset and no changes have been detected")
+            run.log_info(
+                "File is already in the dataset and no changes have been detected"
+            )
             return
 
     # increment dataset version name and create the new dataset version
@@ -474,7 +633,9 @@ def write_to_dataset(df: pl.DataFrame, ds: Dataset) -> None:
     dataset_version = ds.create_version(name=f"v{version_number}")
 
     dataset_version.add_file(dst_file, "data_values.parquet")
-    run.log_info(f"File {dst_file.name} added to dataset {ds.name} {dataset_version.name}")
+    run.log_info(
+        f"File {dst_file.name} added to dataset {ds.name} {dataset_version.name}"
+    )
 
 
 @dhis2_extract_data_elements.task
@@ -493,7 +654,9 @@ def write_to_database(df: pl.DataFrame, table_name: str) -> None:
     run.log_info(f"Data written to DB table {table_name}")
 
 
-def get_dates(start: str | None, end: str | None, period: int | None) -> tuple[str, str]:
+def get_dates(
+    start: str | None, end: str | None, period: int | None
+) -> tuple[str, str]:
     """Resolve start and end dates, applying defaults where needed.
 
     Args:
@@ -509,7 +672,8 @@ def get_dates(start: str | None, end: str | None, period: int | None) -> tuple[s
         run.log_info(f"End date not provided, using {end}")
     if start is None:
         start = (
-            datetime.strptime(end, "%Y-%m-%d") - relativedelta.relativedelta(months=period)
+            datetime.strptime(end, "%Y-%m-%d")
+            - relativedelta.relativedelta(months=period)
         ).strftime("%Y-%m-%d")
         run.log_info(f"Start date not provided, using {start}")
     return start, end
@@ -524,10 +688,16 @@ def check_dates(start: str | None, end: str | None, period: int | None):
         period: Number of months to extract, or None.
 
     Raises:
-        ValueError: If neither start nor period is provided, or if start is after end.
+        ValueError: If neither start nor period is provided, if period is not a
+            positive integer, or if start is after end.
     """
     if start is None and period is None:
         msg = "Either start date or period must be provided."
+        run.log_error(msg)
+        raise ValueError(msg)
+
+    if period is not None and not isinstance(period, int):
+        msg = f"Period must be a whole number of months, got '{period}'."
         run.log_error(msg)
         raise ValueError(msg)
 

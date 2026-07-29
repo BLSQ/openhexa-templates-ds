@@ -1,5 +1,23 @@
 import polars as pl
-from openhexa.toolbox.dhis2.periods import period_from_string
+from dateutil import relativedelta
+from openhexa.toolbox.dhis2.periods import (
+    BiMonth,
+    Day,
+    FinancialApril,
+    FinancialJuly,
+    FinancialNov,
+    FinancialOct,
+    Month,
+    Quarter,
+    SixMonth,
+    Week,
+    WeekSaturday,
+    WeekSunday,
+    WeekThursday,
+    WeekWednesday,
+    Year,
+    period_from_string,
+)
 
 valid_dates = [
     "2023-01-15",
@@ -217,8 +235,21 @@ pyramid = pl.DataFrame(
 dataset_ous_in = {"organisationUnits": [{"id": "ou1"}, {"id": "ou2"}, {"id": "ou3"}]}
 dataset_ous_out = ["ou1", "ou2", "ou3"]
 
+df_with_nulls = pl.DataFrame(
+    {
+        "value": ["10", None, None, "40"],
+        "comment": [None, "missing data", None, "ok"],
+    }
+)
+df_after_drop_nulls_with_comment = pl.DataFrame(
+    {
+        "value": ["10", None, "40"],
+    }
+)
+
 
 date_str = "2023-03-15"
+
 expected_periods = {
     "Daily": "20230315",
     "Weekly": "2023W11",
@@ -236,3 +267,27 @@ expected_periods = {
     "FinancialOct": "2022Oct",
     "FinancialNov": "2022Nov",
 }
+
+# (period_object, expected_DATE_RANGE_DELTA) pairs for test_set_date_range_delta.
+# Daily uses datetime.timedelta internally, but gets capped to 1 month.
+# Weekly variants use relativedelta(weeks=1), also capped to 1 month.
+# Monthly is exactly 1 month — no change.
+# Longer types (BiMonthly and above) pass through their natural duration.
+_one_month = relativedelta.relativedelta(months=1)
+period_delta_cases = [
+    (Day(2023, 3, 15), _one_month),
+    (Week(2023, 11), _one_month),
+    (WeekWednesday(2023, 11), _one_month),
+    (WeekThursday(2023, 10), _one_month),
+    (WeekSaturday(2023, 10), _one_month),
+    (WeekSunday(2023, 10), _one_month),
+    (Month(2023, 3), _one_month),
+    (BiMonth(2023, 3), relativedelta.relativedelta(months=2)),
+    (Quarter(2023, 1), relativedelta.relativedelta(months=3)),
+    (SixMonth(2023, 1), relativedelta.relativedelta(months=6)),
+    (Year(2023), relativedelta.relativedelta(years=1)),
+    (FinancialApril(2023), relativedelta.relativedelta(years=1)),
+    (FinancialJuly(2023), relativedelta.relativedelta(years=1)),
+    (FinancialOct(2023), relativedelta.relativedelta(years=1)),
+    (FinancialNov(2023), relativedelta.relativedelta(years=1)),
+]

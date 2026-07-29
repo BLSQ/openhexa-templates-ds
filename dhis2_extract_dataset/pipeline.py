@@ -13,7 +13,6 @@ from openhexa.sdk.pipelines.parameter import DHIS2Widget
 from openhexa.sdk.workspaces.connection import DHIS2Connection
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import (
-    extract_dataset,
     get_category_option_combos,
     get_data_elements,
     get_datasets,
@@ -22,6 +21,7 @@ from openhexa.toolbox.dhis2.dataframe import (
 )
 from openhexa.toolbox.dhis2.periods import Period, period_from_string
 from sqlalchemy import create_engine
+from utils import extract_dataset
 from validate import validate_data
 
 logger = logging.getLogger(__name__)
@@ -167,9 +167,11 @@ def dhis2_extract_dataset(
     dhis2_name = get_dhis2_name_domain(dhis_con)
     all_ds = get_datasets(dhis)
     ds = all_ds.filter(pl.col("id") == dataset_id)
+    period_type = ds["period_type"].item()
     validate_ous_parameters(ou_ids, ou_group_ids)
-    start_api = isodate_to_period_type(start_date, ds["period_type"].item())
-    end_api = isodate_to_period_type(end_date, ds["period_type"].item())
+    start_api = isodate_to_period_type(start_date, period_type)
+    end_api = isodate_to_period_type(end_date, period_type)
+    set_date_range_delta(dhis, start_api)
     pyramid = get_organisation_units(dhis)
     des = get_data_elements(dhis)
     cocs = get_category_option_combos(dhis)
@@ -184,6 +186,7 @@ def dhis2_extract_dataset(
         ou_group_ids,
         include_children,
     )
+    data_values = drop_null_values_with_comment(data_values)
     data_values = join_object_names(
         df=data_values,
         data_elements=des,
@@ -232,6 +235,28 @@ def get_dates(start: str | None, end: str | None, period: int | None) -> tuple[s
     return start, end
 
 
+def drop_null_values_with_comment(df: pl.DataFrame, drop_comment_col: bool = True) -> pl.DataFrame:
+    """Drop rows where value is null and a comment is present.
+
+    Drop the comment column afterwards if specified.
+
+    Args:
+        df: DataFrame with 'value' and 'comment' columns.
+        drop_comment_col: Whether to drop the 'comment' column after filtering, defaults to True.
+
+    Returns:
+        pl.DataFrame: DataFrame with unexplained null values removed.
+    """
+    before = df.height
+    df = df.filter(~(pl.col("value").is_null() & pl.col("comment").is_not_null()))
+    if drop_comment_col:
+        df = df.drop("comment")
+    dropped = before - df.height
+    if dropped > 0:
+        run.log_info(f"Dropped {dropped} rows with null value and a comment")
+    return df
+
+
 def add_ds_information(
     data_values: pl.DataFrame,
     ds: pl.DataFrame,
@@ -240,7 +265,7 @@ def add_ds_information(
 
     Args:
         data_values (pl.DataFrame): The extracted data values.
-        ds (pl.Dataframe): Dataframe containing the dataset information.
+        ds (pl.DataFrame): Dataframe containing the dataset information.
 
 
     Returns:
@@ -256,7 +281,8 @@ def add_ds_information(
             pl.Series(
                 "period_type_extracted",
                 data_values["period"].map_elements(
-                    lambda x: str(type(period_from_string(x)).__name__), return_dtype=pl.Utf8
+                    lambda x: str(type(period_from_string(x)).__name__),
+                    return_dtype=pl.Utf8,
                 ),
             ),
         )
@@ -341,8 +367,30 @@ def get_dhis(dhis_con: DHIS2Connection, max_nb_ou_extracted: int) -> DHIS2:  # n
     """
     dhis = DHIS2(dhis_con, cache_dir=Path(workspace.files_path) / ".cache")
     dhis.data_value_sets.MAX_ORG_UNITS = max_nb_ou_extracted
-    dhis.data_value_sets.DATE_RANGE_DELTA = relativedelta.relativedelta(months=1)
     return dhis
+
+
+def set_date_range_delta(dhis: DHIS2, period: Period) -> None:
+    """Sets DATE_RANGE_DELTA on the DHIS2 object based on the dataset period type.
+
+    For period types shorter than or equal to one month, the delta is set to 1 month.
+    For longer period types, the delta matches the period duration.
+
+    Period.delta can be either a datetime.timedelta (only Day uses this) or a
+    relativedelta.relativedelta (all other period types). Both are handled explicitly.
+
+    Args:
+        dhis (DHIS2): The DHIS2 object to configure.
+        period (Period): A period object for the dataset's period type.
+    """
+    one_month = relativedelta.relativedelta(months=1)
+    delta = period.delta
+    if isinstance(delta, timedelta) or (
+        isinstance(delta, relativedelta.relativedelta) and delta.years == 0 and delta.months <= 1
+    ):
+        dhis.data_value_sets.DATE_RANGE_DELTA = one_month
+    else:
+        dhis.data_value_sets.DATE_RANGE_DELTA = delta
 
 
 def write_file(table: pl.DataFrame, dhis2_name: str, extract_name: str | None) -> str:
@@ -417,7 +465,11 @@ def write_to_db(table: pl.DataFrame, table_name: str):
 
 # @dhis2_extract_dataset.task
 def warning_post_extraction(
-    table: pl.DataFrame, dataset: pl.DataFrame, dataset_id: str, start: Period, end: Period
+    table: pl.DataFrame,
+    dataset: pl.DataFrame,
+    dataset_id: str,
+    start: Period,
+    end: Period,
 ):
     """Check for warnings in the extracted data.
 
@@ -810,7 +862,12 @@ def isodate_to_period_type(date: str, period_type: str) -> Period:
         iso_year, iso_week, _ = aligned_date.isocalendar()
         if period_type == "Weekly":
             period_str = f"{iso_year}W{iso_week}"  # No leading zero
-        elif period_type in ["WeeklyWednesday", "WeeklyThursday", "WeeklySaturday", "WeeklySunday"]:
+        elif period_type in [
+            "WeeklyWednesday",
+            "WeeklyThursday",
+            "WeeklySaturday",
+            "WeeklySunday",
+        ]:
             period_str = f"{iso_year}{period_type.replace('Weekly', '')[:3]}W{iso_week}"
 
     elif period_type == "Monthly":

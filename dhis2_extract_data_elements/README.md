@@ -13,6 +13,7 @@ This pipeline extracts data values from a DHIS2 instance for specified data elem
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | Source DHIS2 | DHIS2 Connection | Yes | - | Source DHIS2 instance to extract data from |
+| Configuration file | File | No | - | JSON file holding the extraction parameters. If provided, the extraction parameters below must be left empty (see [Configuration file](#configuration-file)) |
 | Data elements | List of String | No | - | Data elements to extract |
 | Data element groups | List of String | No | - | Data element groups to extract |
 | Organisation units | List of String | No | - | IDs of organisation units to extract data from |
@@ -32,6 +33,59 @@ A valid DHIS2 data extraction request is composed of *one unit of information fo
 * Data dimension (what?): Data elements **or** Data element groups
 * Spatial dimension (where?): Organisation units **or** Organisation unit groups (at least one required)
 * Temporal dimension (when?): Start date, End date
+
+## Configuration file
+
+The extraction parameters can either be set individually through the pipeline
+parameters, **or** provided together as a single JSON file through the
+`Configuration file` parameter. When a configuration file is provided, the
+extraction parameters (Data elements, Data element groups, Organisation units,
+Organisation unit groups, Start date, End date, Number of months to extract)
+must be left empty — otherwise the pipeline stops with an error.
+
+The `Include children` toggle is the exception: it is not part of that check.
+When a configuration file is provided, the `include_children` value from the
+file is used and the pipeline-level `Include children` toggle is ignored.
+
+The JSON file supports the following keys (all optional, but the resulting
+request must still satisfy the dimension rules above):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `data_elements` | List of String | Data elements to extract |
+| `data_element_groups` | List of String | Data element groups to extract |
+| `organisation_units` | List of String | IDs of organisation units to extract data from |
+| `organisation_unit_groups` | List of String | IDs of organisation unit groups to extract data from |
+| `include_children` | Boolean | Whether to include children of the selected organisation units (default `false`) |
+| `start_date` | String | Start date for the extraction (YYYY-MM-DD). If not provided, it is calculated as end date - `period` |
+| `end_date` | String | End date for the extraction (YYYY-MM-DD, today by default) |
+| `period` | Integer | Number of months to extract. Only used if `start_date` is not provided |
+
+Either `start_date` or `period` must be provided.
+
+Example `config.json`:
+
+```json
+{
+  "data_elements": ["pikOziyCXbM", "x3Do5e7g4Qo"],
+  "organisation_units": ["vELbGdEphPd"],
+  "include_children": false,
+  "start_date": "2024-01-01",
+  "end_date": "2024-12-31"
+}
+```
+
+Example `config.json` using a relative period, here extracting the last 3
+months up to today:
+
+```json
+{
+  "data_elements": ["pikOziyCXbM", "x3Do5e7g4Qo"],
+  "organisation_units": ["vELbGdEphPd"],
+  "include_children": false,
+  "period": 3
+}
+```
 
 ## Output
 
