@@ -2,7 +2,6 @@
 
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -19,7 +18,6 @@ from pipeline import (
     export_to_dataset,
     export_to_file,
     fetch_org_units,
-    get_organisation_units,
 )
 from shapely.geometry import Point
 
@@ -59,7 +57,7 @@ def test_authenticate_iaso_failure(
     mock_run.log_error.assert_called_once()
 
 
-@patch("pipeline.get_organisation_units")
+@patch("pipeline.dataframe.get_organisation_units")
 def test_fetch_org_units_with_type_id(mock_get: MagicMock) -> None:
     """Test fetching org units when type ID is provided."""
     mock_client: MagicMock = MagicMock()
@@ -72,10 +70,10 @@ def test_fetch_org_units_with_type_id(mock_get: MagicMock) -> None:
     result = fetch_org_units(mock_client, 1)
 
     assert isinstance(result, pl.DataFrame)
-    mock_get.assert_called_once()
+    mock_get.assert_called_once_with(iaso=mock_client, ou_type_id=1, ou_parent_id=None)
 
 
-@patch("pipeline.get_organisation_units")
+@patch("pipeline.dataframe.get_organisation_units")
 def test_fetch_org_units_without_type_id(mock_get: MagicMock) -> None:
     """Test fetching org units when no type ID is provided."""
     mock_client: MagicMock = MagicMock()
@@ -84,80 +82,36 @@ def test_fetch_org_units_without_type_id(mock_get: MagicMock) -> None:
     result = fetch_org_units(mock_client, None)
 
     assert isinstance(result, pl.DataFrame)
-    mock_get.assert_called_once()
+    mock_get.assert_called_once_with(iaso=mock_client, ou_type_id=None, ou_parent_id=None)
 
 
-@patch("pipeline.dataframe._get_org_units_geometries")
-def test_get_organisation_units_with_type_id(
-    mock_geoms: MagicMock,
-) -> None:
-    """Test retrieval of organization units with type ID."""
-    csv_data: str = """ID,Nom,Type,Latitude,Longitude,Date d'ouverture,Date de fermeture,Date de création,Date de modification,Source,Validé,Référence externe
-1,Test,TypeA,0,0,2020-01-01,2021-01-01,2020-01-01 10:00,2020-01-02 10:00,SRC,Yes,Ref1
-"""  # noqa: E501
-    mock_response: MagicMock = MagicMock()
-    mock_response.content = csv_data.encode()
-    mock_response.raise_for_status.return_value = None
-
+@patch("pipeline.dataframe.get_organisation_units")
+def test_fetch_org_units_with_single_parent(mock_get: MagicMock) -> None:
+    """Test fetching org units when a single parent ID is provided."""
     mock_client: MagicMock = MagicMock()
-    mock_client.api_client.get.return_value = mock_response
+    mock_get.return_value = pl.DataFrame({"id": [1]})
 
-    mock_geoms.return_value = {1: json.dumps({"type": "Point", "coordinates": [0, 0]})}
+    result = fetch_org_units(mock_client, None, ou_parent_ids=[42])
 
-    df: pl.DataFrame = get_organisation_units(mock_client, 1)
-    mock_client.api_client.get.assert_called_once_with(
-        url="api/orgunits",
-        params={"csv": True, "orgUnitTypeId": 1},
-        stream=True,
-    )
+    assert isinstance(result, pl.DataFrame)
+    mock_get.assert_called_once_with(iaso=mock_client, ou_type_id=None, ou_parent_id=42)
 
-    assert isinstance(df, pl.DataFrame)
-    assert "geometry" in df.columns
-    assert df.columns == [
-        "id",
-        "name",
-        "org_unit_type",
-        "latitude",
-        "longitude",
-        "opening_date",
-        "closing_date",
-        "created_at",
-        "updated_at",
-        "source",
-        "validation_status",
-        "source_ref",
-        "geometry",
+
+@patch("pipeline.dataframe.get_organisation_units")
+def test_fetch_org_units_with_multiple_parents_deduplicates(mock_get: MagicMock) -> None:
+    """Multiple parent IDs trigger one toolbox call each and the result is deduplicated."""
+    mock_client: MagicMock = MagicMock()
+    mock_get.side_effect = [
+        pl.DataFrame({"id": [1, 2], "name": ["a", "b"]}),
+        pl.DataFrame({"id": [2, 3], "name": ["b", "c"]}),
     ]
-    assert df["id"].to_list() == [1]
-    assert df["created_at"].to_list()[0] == datetime(2020, 1, 1, 10, 0)
-    assert df["geometry"].to_list() == ['{"type": "Point", "coordinates": [0, 0]}']
 
+    result = fetch_org_units(mock_client, None, ou_parent_ids=[10, 20])
 
-@patch("pipeline.dataframe._get_org_units_geometries")
-def test_get_organisation_units_without_type_id(
-    mock_geoms: MagicMock,
-) -> None:
-    """Test retrieval of organization units without type ID."""
-    csv_data: str = """ID,Nom,Type,Latitude,Longitude,Date d'ouverture,Date de fermeture,Date de création,Date de modification,Source,Validé,Référence externe
-1,Test,TypeA,0,0,2020-01-01,2021-01-01,2020-01-01 10:00,2020-01-02 10:00,SRC,Yes,Ref1
-"""  # noqa: E501
-    mock_response: MagicMock = MagicMock()
-    mock_response.content = csv_data.encode()
-    mock_response.raise_for_status.return_value = None
-
-    mock_client: MagicMock = MagicMock()
-    mock_client.api_client.get.return_value = mock_response
-
-    mock_geoms.return_value = {}
-
-    df: pl.DataFrame = get_organisation_units(mock_client)
-    mock_client.api_client.get.assert_called_once_with(
-        "/api/orgunits",
-        params={"csv": True},
-        stream=True,
-    )
-
-    assert isinstance(df, pl.DataFrame)
+    assert mock_get.call_count == 2
+    mock_get.assert_any_call(iaso=mock_client, ou_type_id=None, ou_parent_id=10)
+    mock_get.assert_any_call(iaso=mock_client, ou_type_id=None, ou_parent_id=20)
+    assert sorted(result["id"].to_list()) == [1, 2, 3]
 
 
 @patch("pipeline.current_run")

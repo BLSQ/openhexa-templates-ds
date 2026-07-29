@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+from unittest.mock import patch
 
 import polars as pl
 from openhexa.sdk import (
@@ -17,7 +20,23 @@ from openhexa.sdk import (
 from openhexa.sdk.datasets.dataset import Dataset
 from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO, dataframe
-from utils import clean_string, in_dataset_version
+from utils import clean_string, get_available_languages, in_dataset_version
+
+
+@contextmanager
+def _force_string_csv_inference() -> Iterator[None]:
+    # Workaround for openhexa.toolbox extract_submissions: pl.read_csv is called
+    # without infer_schema_length, so a column with a mix of int-looking and
+    # float-looking values (e.g. 37 vs 37.5) raises during CSV parsing. We force
+    # full-scan inference; final dtypes are reapplied later from form metadata.
+    original = pl.read_csv
+
+    def patched(*args, **kwargs):  # ruff:ignore[missing-type-args, missing-type-kwargs, missing-return-type-private-function]
+        kwargs.setdefault("infer_schema_length", None)
+        return original(*args, **kwargs)
+
+    with patch("polars.read_csv", patched):
+        yield
 
 
 @pipeline("iaso_extract_submissions")
@@ -29,6 +48,16 @@ from utils import clean_string, in_dataset_version
     widget=IASOWidget.IASO_FORMS,
     connection="iaso_connection",  # type: ignore
     required=True,
+)
+@parameter(
+    "ou_parent_ids",
+    name="Organization Unit Parents",
+    type=int,
+    multiple=True,
+    widget=IASOWidget.IASO_ORG_UNITS,
+    connection="iaso_connection",  # type: ignore
+    required=False,
+    help="Filter submissions to those from org units under one or more parent unit IDs (optional)",
 )
 @parameter(
     "last_updated",
@@ -44,6 +73,18 @@ from utils import clean_string, in_dataset_version
     default=True,
     required=False,
     help="Replace choice codes with labels",
+    disables=["language"],
+    disable_when=False,
+)
+@parameter(
+    "language",
+    name="Language for choice labels",
+    type=str,
+    required=False,
+    help=(
+        "Language for choice labels, only used if `Convert Choices to Labels` is enabled. "
+        "(e.g. `English`, `French`, `Português`)"
+    ),
 )
 @parameter(
     code="output_file_name",
@@ -93,8 +134,10 @@ from utils import clean_string, in_dataset_version
 def iaso_extract_submissions(
     iaso_connection: IASOConnection,
     form_id: int,
+    ou_parent_ids: list[int] | None,
     last_updated: str | None,
     choices_to_labels: bool | None,
+    language: str | None,
     output_file_name: str | None,
     output_format: str | None,
     db_table_name: str | None,
@@ -109,8 +152,10 @@ def iaso_extract_submissions(
     form_name = get_form_name(iaso, form_id)
     cutoff_date = parse_cutoff_date(last_updated)
 
-    submissions = fetch_submissions(iaso, form_id, cutoff_date)
-    submissions = process_choices(submissions, choices_to_labels, iaso, form_id)
+    submissions = fetch_submissions(
+        iaso=iaso, form_id=form_id, ou_parent_ids=ou_parent_ids, cutoff_date=cutoff_date
+    )
+    submissions = process_choices(submissions, choices_to_labels, language, iaso, form_id)
     submissions = deduplicate_columns(submissions)
 
     output_file_path = export_to_file(
@@ -190,13 +235,19 @@ def parse_cutoff_date(date_str: str | None) -> str | None:
 def fetch_submissions(
     iaso: IASO,
     form_id: int,
+    ou_parent_ids: list[int] | None,
     cutoff_date: str | None,
 ) -> pl.DataFrame:
     """Retrieve form submissions from IASO API.
 
+    When several parent org unit IDs are provided, one toolbox call is issued per
+    parent and the resulting DataFrames are concatenated (and deduplicated by id)
+    because the toolbox helper only accepts a single `ou_parent_id`.
+
     Args:
         iaso: Authenticated IASO client
         form_id: Target form identifier
+        ou_parent_ids: Optional list of parent org unit IDs to filter submissions
         cutoff_date: Optional date filter
 
     Returns:
@@ -204,7 +255,24 @@ def fetch_submissions(
     """
     try:
         current_run.log_info(f"Fetching submissions for form ID {form_id}")
-        return dataframe.extract_submissions(iaso, form_id, cutoff_date)
+        with _force_string_csv_inference():
+            if not ou_parent_ids:
+                return dataframe.extract_submissions(
+                    iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=None
+                )
+
+            frames = [
+                dataframe.extract_submissions(
+                    iaso=iaso,
+                    form_id=form_id,
+                    last_updated=cutoff_date,
+                    ou_parent_id=parent_id,
+                )
+                for parent_id in ou_parent_ids
+            ]
+            return pl.concat(frames, how="diagonal_relaxed").unique(
+                subset=["id"], maintain_order=True
+            )
     except Exception as exc:
         current_run.log_error(f"Submission retrieval failed: {exc}")
         raise
@@ -212,13 +280,18 @@ def fetch_submissions(
 
 # @iaso_extract_submissions.task
 def process_choices(
-    submissions: pl.DataFrame, convert: bool | None, iaso_client: IASO, form_id: int
+    submissions: pl.DataFrame,
+    convert: bool | None,
+    language: str | None,
+    iaso_client: IASO,
+    form_id: int,
 ) -> pl.DataFrame:
     """Convert choice codes to human-readable labels if requested.
 
     Args:
         submissions: Raw submissions DataFrame
         convert: Conversion flag
+        language: Language for choice labels
         iaso_client: Authenticated IASO client
         form_id: Target form identifier
 
@@ -230,9 +303,34 @@ def process_choices(
 
     try:
         form_metadata = dataframe.get_form_metadata(iaso_client, form_id)
+    except Exception as exc:
+        current_run.log_error(f"Failed to fetch form metadata: {exc}")
+        raise
+
+    available_languages = get_available_languages(form_metadata)
+
+    if available_languages:
+        current_run.log_info(f"Form choice labels available in languages: {available_languages}")
+        if not language:
+            raise ValueError(
+                "This form is multi-language; the `Language` parameter is required. "
+                f"Available languages: {available_languages}"
+            )
+        if language not in available_languages:
+            raise ValueError(
+                f"Language `{language}` is not available for this form. "
+                f"Choose one of: {available_languages}"
+            )
+    elif language:
+        current_run.log_warning(
+            "This form is single-language; the `Language` parameter is ignored."
+        )
+
+    try:
         return dataframe.replace_labels(
             submissions=submissions,
             form_metadata=form_metadata,  # type: ignore
+            language=language,
         )
     except Exception as exc:
         current_run.log_error(f"Choice conversion failed: {exc}")
@@ -327,7 +425,7 @@ def export_to_database(
         mode = mode or "replace"
         submissions.write_database(
             table_name=table_name,
-            connection=workspace.database_url,
+            connection=workspace.database_url,  # type: ignore
             if_table_exists=mode,
         )
         current_run.add_database_output(table_name)
@@ -389,7 +487,10 @@ def _process_submissions(submissions: pl.DataFrame) -> pl.DataFrame:
     if binary_exprs:
         submissions = submissions.with_columns(binary_exprs)
 
-    submissions = submissions.drop(list_cols).select(pl.exclude("instanceid"), pl.col("instanceid"))
+    submissions = submissions.drop(list_cols)
+
+    if "instanceid" in submissions.columns:
+        submissions = submissions.select(pl.exclude("instanceid"), pl.col("instanceid"))
 
     return submissions.select(sorted(submissions.columns)).sort(submissions.columns)
 
@@ -410,8 +511,8 @@ def _validate_schema(submissions: pl.DataFrame, table_name: str) -> bool:
                 f"select column_name from information_schema.columns "
                 f"where table_name='{table_name}'"
             ),
-            uri=workspace.database_url,
-        )
+            uri=workspace.database_url,  # type: ignore
+        )  # type: ignore
         .select("column_name")
         .to_series()
         .to_list()

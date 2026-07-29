@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from io import StringIO
 from pathlib import Path
 from typing import Literal
 
@@ -19,6 +18,7 @@ from openhexa.sdk import (
     workspace,
 )
 from openhexa.sdk.datasets.dataset import Dataset
+from openhexa.sdk.pipelines.parameter import IASOWidget  # type: ignore
 from openhexa.toolbox.iaso import IASO, dataframe
 from sqlalchemy import create_engine
 from utils import clean_string, convert_to_geometry, get_driver, in_dataset_version
@@ -31,6 +31,16 @@ from utils import clean_string, convert_to_geometry, get_driver, in_dataset_vers
     type=IASOConnection,  # type: ignore
     required=True,
     help="Authenticated connection to IASO platform",
+)
+@parameter(
+    "ou_parent_ids",
+    name="Organization Unit Parents",
+    type=int,
+    multiple=True,
+    widget=IASOWidget.IASO_ORG_UNITS,
+    connection="iaso_connection",  # type: ignore
+    required=False,
+    help="Restrict extraction to org units under one or more parent unit IDs (optional)",
 )
 @parameter(
     "ou_type_id",
@@ -90,6 +100,7 @@ from utils import clean_string, convert_to_geometry, get_driver, in_dataset_vers
 )
 def iaso_extract_orgunits(
     iaso_connection: IASOConnection,
+    ou_parent_ids: list[int] | None,
     ou_type_id: int | None,
     output_file_name: str | None,
     output_format: str,
@@ -101,6 +112,7 @@ def iaso_extract_orgunits(
 
     Args:
         iaso_connection: Authenticated IASO connection parameters
+        ou_parent_ids: Optional list of parent org unit IDs to restrict the extraction
         ou_type_id: Optional specific organization unit type identifier
         output_file_name: Base name for output file in workspace files directory
         output_format: File format for exporting data
@@ -112,7 +124,7 @@ def iaso_extract_orgunits(
 
     iaso_client = authenticate_iaso(iaso_connection)
 
-    org_units_df = fetch_org_units(iaso_client, ou_type_id)
+    org_units_df = fetch_org_units(iaso_client, ou_type_id, ou_parent_ids)
     org_units_df = org_units_df.select(sorted(org_units_df.columns)).sort(org_units_df.columns)
 
     output_file_path = export_to_file(
@@ -153,21 +165,29 @@ def authenticate_iaso(connection: IASOConnection) -> IASO:
 
 
 # @iaso_extract_orgunits.task
-def fetch_org_units(iaso_client: IASO, ou_type_id: int | None) -> pl.DataFrame:
-    """Retrieve organizational units data from IASO.
+def fetch_org_units(
+    iaso_client: IASO,
+    ou_type_id: int | None,
+    ou_parent_ids: list[int] | None = None,
+) -> pl.DataFrame:
+    """Retrieve organizational units data from IASO via the toolbox helper.
+
+    When several parent org unit IDs are provided, one toolbox call is issued per
+    parent and the resulting DataFrames are concatenated (and deduplicated by id)
+    because the toolbox helper only accepts a single `ou_parent_id`.
 
     Args:
         iaso_client: Authenticated IASO client
         ou_type_id: Optional specific organization unit type identifier
+        ou_parent_ids: Optional list of parent org unit IDs to restrict the extraction
 
     Returns:
         DataFrame containing organizational units data
 
     Raises:
-        ValueError: If specified org unit ID is not found
+        ValueError: If the specified org unit type ID is not found
     """
-    # current_run.log_info(f"{iaso_client.api_client.server_url}")
-    try:
+    try:  # noqa: PLW0717
         if ou_type_id:
             response = iaso_client.api_client.get("/api/orgunittypes")
             org_type_df = pl.DataFrame(response.json()["orgUnitTypes"]).filter(
@@ -177,75 +197,18 @@ def fetch_org_units(iaso_client: IASO, ou_type_id: int | None) -> pl.DataFrame:
             if org_type_df.is_empty():
                 raise ValueError(f"No organization type found for ID {ou_type_id}")
 
-            return get_organisation_units(iaso_client=iaso_client, ou_type_id=ou_type_id)
-
-        return get_organisation_units(iaso_client)
-
-    except Exception as err:
-        current_run.log_error(f"Failed to fetch OrgUnit from IASO API: {err}")
-        raise
-
-
-def get_organisation_units(iaso_client: IASO, ou_type_id: int | None = None) -> pl.DataFrame:
-    """Retrieve organizational units data from IASO.
-
-    Args:
-        iaso_client: Authenticated IASO client
-        ou_type_id: Optional specific organization unit type ID
-
-    Returns:
-        DataFrame containing organizational units data
-
-    Raises:
-        ValueError: If specified org unit ID is not found
-    """
-    try:
-        if ou_type_id:
-            response = iaso_client.api_client.get(
-                url="api/orgunits", params={"csv": True, "orgUnitTypeId": ou_type_id}, stream=True
+        if not ou_parent_ids:
+            return dataframe.get_organisation_units(
+                iaso=iaso_client, ou_type_id=ou_type_id, ou_parent_id=None
             )
-            response.raise_for_status()
 
-            df_ou = pl.read_csv(StringIO(response.content.decode("utf8")))
-
-        else:
-            response = iaso_client.api_client.get(
-                "/api/orgunits", params={"csv": True}, stream=True
+        frames = [
+            dataframe.get_organisation_units(
+                iaso=iaso_client, ou_type_id=ou_type_id, ou_parent_id=parent_id
             )
-            response.raise_for_status()
-
-            df_ou = pl.read_csv(StringIO(response.content.decode("utf8")))
-
-        df_ou = df_ou.select(
-            pl.col("ID").alias("id"),
-            pl.col("Nom").alias("name"),
-            pl.col("Type").alias("org_unit_type"),
-            pl.col("Latitude").alias("latitude"),
-            pl.col("Longitude").alias("longitude"),
-            pl.col("Date d'ouverture").str.to_date("%Y-%m-%d").alias("opening_date"),
-            pl.col("Date de fermeture").str.to_date("%Y-%m-%d").alias("closing_date"),
-            pl.col("Date de création").str.to_datetime("%Y-%m-%d %H:%M").alias("created_at"),
-            pl.col("Date de modification").str.to_datetime("%Y-%m-%d %H:%M").alias("updated_at"),
-            pl.col("Source").alias("source"),
-            pl.col("Validé").alias("validation_status"),
-            pl.col("Référence externe").alias("source_ref"),
-            *[
-                pl.col(f"Ref Ext parent {lvl}").alias(f"level_{lvl}_ref")
-                for lvl in range(1, 10)
-                if f"Ref Ext parent {lvl}" in df_ou.columns
-            ],
-            *[
-                pl.col(f"parent {lvl}").alias(f"level_{lvl}_name")
-                for lvl in range(1, 10)
-                if f"parent {lvl}" in df_ou.columns
-            ],
-        )
-        geoms = dataframe._get_org_units_geometries(iaso_client)
-        return df_ou.with_columns(
-            pl.col("id")
-            .map_elements(lambda x: geoms.get(x, None), return_dtype=pl.String)
-            .alias("geometry")
-        )
+            for parent_id in ou_parent_ids
+        ]
+        return pl.concat(frames, how="diagonal_relaxed").unique(subset=["id"])
 
     except Exception as err:
         current_run.log_error(f"Failed to fetch OrgUnit from IASO API: {err}")
@@ -358,7 +321,7 @@ def export_to_database(
 
     current_run.log_info("Exporting to database table")
 
-    try:
+    try:  # noqa: PLW0717
         geo_df = _prepare_geodataframe(org_units_df)
 
         engine = create_engine(workspace.database_url)  # type: ignore

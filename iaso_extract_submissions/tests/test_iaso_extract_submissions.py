@@ -1,28 +1,32 @@
-import json
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from pipeline import (
     authenticate_iaso,
     clean_string,
     fetch_submissions,
+    get_available_languages,
     get_form_name,
     parse_cutoff_date,
+    process_choices,
 )
 
 
-class FakeIASOConnection:  # noqa: B903
+class FakeIASOConnection:  # ruff:ignore[class-as-data-structure]
     """Simple fake IASOConnection for testing."""
 
     def __init__(
-            self, 
-            url: str = "https://iaso.test", 
-            username: str = "user", 
-            password: str = "pass"):
+        self, url: str = "https://iaso.test", username: str = "user", password: str = "pass"
+    ):
         self.url = url
         self.username = username
-        self.password = password    
+        self.password = password
 
 
 def test_successful_iaso_authentication():
@@ -30,11 +34,10 @@ def test_successful_iaso_authentication():
     conn = FakeIASOConnection()
 
     with patch("pipeline.IASO") as mock_iaso, patch("pipeline.current_run") as mock_current_run:
-
         mock_iaso_instance = MagicMock()
         mock_iaso.return_value = mock_iaso_instance
 
-        result = authenticate_iaso(conn)
+        result = authenticate_iaso(conn)  # type: ignore
 
         # checking that IASO is instantiated correctly
         mock_iaso.assert_called_once_with(conn.url, conn.username, conn.password)
@@ -54,8 +57,8 @@ def test_authenticate_iaso_failure():
         mock_iaso.side_effect = Exception("Invalid credentials")
 
         with pytest.raises(RuntimeError) as excinfo:
-            authenticate_iaso(conn)
-        
+            authenticate_iaso(conn)  # type: ignore
+
         # Check that the error log is written
         mock_current_run.log_error.assert_called_once()
         assert "IASO authentication failed" in str(excinfo.value)
@@ -70,7 +73,7 @@ def test_authenticate_iaso_failure():
 
 
 @pytest.mark.parametrize(
-        ("input_str", "expected"),
+    ("input_str", "expected"),
     [
         ("Household Survey", "household_survey"),
         ("   Survey Name   ", "survey_name"),
@@ -93,22 +96,21 @@ def test_clean_string(input_str: str, expected: str):
 # get_form_name tests
 # -------------------------------------------------------------------
 
+
 class FakeResponse:
     """Minimal fake response object with json() method."""
 
-    def __init__(self, payload: json):
+    def __init__(self, payload: dict):
         self._payload = payload
 
-    def json(self):  # noqa: ANN201, D102
+    def json(self):  # ruff:ignore[missing-return-type-undocumented-public-function, undocumented-public-method]
         return self._payload
 
 
 def test_get_form_name_success():
     """Should fetch form name and return cleaned value."""
     iaso = MagicMock()
-    iaso.api_client.get.return_value = FakeResponse(
-        {"name": "  École Santé Form  "}
-    )
+    iaso.api_client.get.return_value = FakeResponse({"name": "  École Santé Form  "})
 
     with patch("pipeline.current_run") as mock_current_run:
         result = get_form_name(iaso, form_id=123)
@@ -131,7 +133,7 @@ def test_get_form_name_missing_name_field():
     iaso.api_client.get.return_value = FakeResponse({})
 
     with patch("pipeline.current_run") as mock_current_run:
-        with pytest.raises(ValueError):  # noqa: PT011
+        with pytest.raises(ValueError):  # ruff:ignore[pytest-raises-too-broad]
             get_form_name(iaso, form_id=456)
 
         mock_current_run.log_error.assert_called_once()
@@ -143,7 +145,7 @@ def test_get_form_name_api_failure():
     iaso.api_client.get.side_effect = Exception("404 Not Found")
 
     with patch("pipeline.current_run") as mock_current_run:
-        with pytest.raises(ValueError) as excinfo:  # noqa: PT011
+        with pytest.raises(ValueError) as excinfo:  # ruff:ignore[pytest-raises-too-broad]
             get_form_name(iaso, form_id=999)
 
         mock_current_run.log_error.assert_called_once()
@@ -153,6 +155,7 @@ def test_get_form_name_api_failure():
 # -------------------------------------------------------------------
 # parse_cutoff_date tests
 # -------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     ("input_date", "expected"),
@@ -183,18 +186,18 @@ def test_parse_cutoff_date_none_or_empty(input_date: str):
 @pytest.mark.parametrize(
     "input_date",
     [
-        "01-01-2024",   # wrong format
-        "2024/01/01",   # wrong separator
-        "2024-13-01",   # invalid month
-        "2024-00-10",   # invalid month
-        "2024-02-30",   # invalid day
-        "abcd-ef-gh",   # not a date
+        "01-01-2024",  # wrong format
+        "2024/01/01",  # wrong separator
+        "2024-13-01",  # invalid month
+        "2024-00-10",  # invalid month
+        "2024-02-30",  # invalid day
+        "abcd-ef-gh",  # not a date
     ],
 )
 def test_parse_cutoff_date_invalid_format(input_date: str):
     """Should log error and raise ValueError for invalid date strings."""
     with patch("pipeline.current_run") as mock_current_run:
-        with pytest.raises(ValueError) as excinfo:  # noqa: PT011
+        with pytest.raises(ValueError) as excinfo:  # ruff:ignore[pytest-raises-too-broad]
             parse_cutoff_date(input_date)
 
         mock_current_run.log_error.assert_called_once_with(
@@ -207,10 +210,12 @@ def test_parse_cutoff_date_invalid_format(input_date: str):
 # fetch_submissions tests
 # -------------------------------------------------------------------
 
-def test_fetch_submissions_success():
+
+def test_fetch_submissions_success_with_single_parent():
     """Should log info and return DataFrame when extraction succeeds."""
     iaso = MagicMock()
     form_id = 123
+    ou_parent_ids = [456]
     cutoff_date = "2024-01-01"
 
     expected_df = pl.DataFrame(
@@ -220,14 +225,16 @@ def test_fetch_submissions_success():
         }
     )
 
-    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
-         patch("pipeline.current_run") as mock_current_run:
-
+    with (
+        patch("pipeline.dataframe.extract_submissions") as mock_extract,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
         mock_extract.return_value = expected_df
 
         result = fetch_submissions(
             iaso=iaso,
             form_id=form_id,
+            ou_parent_ids=ou_parent_ids,
             cutoff_date=cutoff_date,
         )
 
@@ -237,11 +244,40 @@ def test_fetch_submissions_success():
         mock_current_run.log_error.assert_not_called()
 
         mock_extract.assert_called_once_with(
-            iaso, form_id, cutoff_date
+            iaso=iaso, form_id=form_id, last_updated=cutoff_date, ou_parent_id=456
         )
 
         assert isinstance(result, pl.DataFrame)
         assert result.to_dicts() == expected_df.to_dicts()
+
+
+def test_fetch_submissions_with_multiple_parents_deduplicates():
+    """Multiple parent IDs trigger one toolbox call each; results are deduplicated."""
+    iaso = MagicMock()
+    form_id = 321
+    ou_parent_ids = [10, 20]
+
+    with (
+        patch("pipeline.dataframe.extract_submissions") as mock_extract,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
+        mock_extract.side_effect = [
+            pl.DataFrame({"id": [1, 2], "value": ["a", "b"]}),
+            pl.DataFrame({"id": [2, 3], "value": ["b", "c"]}),
+        ]
+
+        result = fetch_submissions(
+            iaso=iaso,
+            form_id=form_id,
+            ou_parent_ids=ou_parent_ids,
+            cutoff_date=None,
+        )
+
+        assert mock_extract.call_count == 2
+        mock_extract.assert_any_call(iaso=iaso, form_id=form_id, last_updated=None, ou_parent_id=10)
+        mock_extract.assert_any_call(iaso=iaso, form_id=form_id, last_updated=None, ou_parent_id=20)
+        assert sorted(result["id"].to_list()) == [1, 2, 3]
+        mock_current_run.log_error.assert_not_called()
 
 
 def test_fetch_submissions_success_without_cutoff_date():
@@ -251,19 +287,21 @@ def test_fetch_submissions_success_without_cutoff_date():
 
     expected_df = pl.DataFrame({"id": []})
 
-    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
-         patch("pipeline.current_run") as mock_current_run:
-
+    with (
+        patch("pipeline.dataframe.extract_submissions") as mock_extract,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
         mock_extract.return_value = expected_df
 
         result = fetch_submissions(
             iaso=iaso,
             form_id=form_id,
+            ou_parent_ids=None,
             cutoff_date=None,
         )
 
         mock_extract.assert_called_once_with(
-            iaso, form_id, None
+            iaso=iaso, form_id=form_id, last_updated=None, ou_parent_id=None
         )
         mock_current_run.log_error.assert_not_called()
 
@@ -276,15 +314,17 @@ def test_fetch_submissions_failure():
     form_id = 999
     cutoff_date = "2024-01-01"
 
-    with patch("pipeline.dataframe.extract_submissions") as mock_extract, \
-         patch("pipeline.current_run") as mock_current_run:
-
+    with (
+        patch("pipeline.dataframe.extract_submissions") as mock_extract,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
         mock_extract.side_effect = RuntimeError("API timeout")
 
         with pytest.raises(RuntimeError):
             fetch_submissions(
                 iaso=iaso,
                 form_id=form_id,
+                ou_parent_ids=None,
                 cutoff_date=cutoff_date,
             )
 
@@ -292,3 +332,182 @@ def test_fetch_submissions_failure():
             f"Fetching submissions for form ID {form_id}"
         )
         mock_current_run.log_error.assert_called_once()
+
+
+# -------------------------------------------------------------------
+# get_available_languages tests
+# -------------------------------------------------------------------
+
+
+def _multilang_metadata() -> dict:
+    """Form metadata for a two-language form (choice labels are dicts).
+
+    Returns:
+        dict: Metadata whose choice labels are ``{language: label}`` mappings.
+    """
+    return {
+        1: {
+            "questions": {},
+            "choices": {
+                "yes_no": [
+                    {"name": "yes", "label": {"English": "Yes", "French": "Oui"}},
+                    {"name": "no", "label": {"English": "No", "French": "Non"}},
+                ]
+            },
+        }
+    }
+
+
+def _singlelang_metadata() -> dict:
+    """Form metadata for a single-language form (choice labels are strings).
+
+    Returns:
+        dict: Metadata whose choice labels are plain strings.
+    """
+    return {
+        1: {
+            "questions": {},
+            "choices": {"yes_no": [{"name": "yes", "label": "Yes"}]},
+        }
+    }
+
+
+def test_get_available_languages_multilang():
+    """Should return the sorted union of label keys across choices."""
+    assert get_available_languages(_multilang_metadata()) == ["English", "French"]
+
+
+def test_get_available_languages_single_language_returns_empty():
+    """Single-language forms use string labels and declare no language."""
+    assert get_available_languages(_singlelang_metadata()) == []
+
+
+def test_get_available_languages_unions_across_versions():
+    """Languages are collected across all versions and de-duplicated."""
+    metadata = {
+        1: {"choices": {"a": [{"name": "x", "label": {"English": "X"}}]}},
+        2: {"choices": {"b": [{"name": "y", "label": {"English": "Y", "Português": "Y"}}]}},
+    }
+    assert get_available_languages(metadata) == ["English", "Português"]
+
+
+def test_get_available_languages_handles_missing_label_and_choices():
+    """Choices without a label dict (or missing keys) are ignored, not crashed on."""
+    metadata = {
+        1: {"choices": {"a": [{"name": "x"}, {"name": "y", "label": None}]}},
+        2: {},
+    }
+    assert get_available_languages(metadata) == []
+
+
+# -------------------------------------------------------------------
+# process_choices tests
+# -------------------------------------------------------------------
+
+
+def test_process_choices_convert_disabled_returns_input_untouched():
+    """When conversion is off, submissions are returned as-is with no API call."""
+    submissions = pl.DataFrame({"id": [1]})
+
+    with patch("pipeline.dataframe.get_form_metadata") as mock_meta:
+        result = process_choices(
+            submissions, convert=False, language=None, iaso_client=MagicMock(), form_id=1
+        )
+
+        assert result is submissions
+        mock_meta.assert_not_called()
+
+
+def test_process_choices_multilang_valid_language():
+    """A valid language logs the available list and calls replace_labels."""
+    submissions = pl.DataFrame({"id": [1]})
+    labelled = pl.DataFrame({"id": [1], "q": ["Yes"]})
+
+    with (
+        patch("pipeline.dataframe.get_form_metadata", return_value=_multilang_metadata()),
+        patch("pipeline.dataframe.replace_labels", return_value=labelled) as mock_replace,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
+        result = process_choices(
+            submissions, convert=True, language="French", iaso_client=MagicMock(), form_id=1
+        )
+
+        assert result is labelled
+        mock_replace.assert_called_once()
+        assert mock_replace.call_args.kwargs["language"] == "French"
+        mock_current_run.log_info.assert_called_once()
+
+
+def test_process_choices_multilang_missing_language_raises():
+    """A multi-language form without a language raises before calling replace_labels."""
+    with (
+        patch("pipeline.dataframe.get_form_metadata", return_value=_multilang_metadata()),
+        patch("pipeline.dataframe.replace_labels") as mock_replace,
+        patch("pipeline.current_run"),
+    ):
+        with pytest.raises(ValueError, match="multi-language"):
+            process_choices(
+                pl.DataFrame({"id": [1]}),
+                convert=True,
+                language=None,
+                iaso_client=MagicMock(),
+                form_id=1,
+            )
+
+        mock_replace.assert_not_called()
+
+
+def test_process_choices_multilang_unknown_language_raises_with_available():
+    """An unavailable language raises, surfacing the available languages."""
+    with (
+        patch("pipeline.dataframe.get_form_metadata", return_value=_multilang_metadata()),
+        patch("pipeline.dataframe.replace_labels") as mock_replace,
+        patch("pipeline.current_run"),
+    ):
+        with pytest.raises(ValueError, match="English"):
+            process_choices(
+                pl.DataFrame({"id": [1]}),
+                convert=True,
+                language="Spanish",
+                iaso_client=MagicMock(),
+                form_id=1,
+            )
+
+        mock_replace.assert_not_called()
+
+
+def test_process_choices_single_language_ignores_language_with_warning():
+    """A single-language form warns that the language is ignored, then converts."""
+    submissions = pl.DataFrame({"id": [1]})
+
+    with (
+        patch("pipeline.dataframe.get_form_metadata", return_value=_singlelang_metadata()),
+        patch("pipeline.dataframe.replace_labels", return_value=submissions) as mock_replace,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
+        process_choices(
+            submissions, convert=True, language="French", iaso_client=MagicMock(), form_id=1
+        )
+
+        mock_current_run.log_warning.assert_called_once()
+        mock_replace.assert_called_once()
+
+
+def test_process_choices_metadata_fetch_failure_raises():
+    """A metadata fetch error is logged and re-raised without touching replace_labels."""
+    with (
+        patch("pipeline.dataframe.get_form_metadata", side_effect=RuntimeError("boom")),
+        patch("pipeline.dataframe.replace_labels") as mock_replace,
+        patch("pipeline.current_run") as mock_current_run,
+    ):
+        with pytest.raises(RuntimeError):
+            process_choices(
+                pl.DataFrame({"id": [1]}),
+                convert=True,
+                language="French",
+                iaso_client=MagicMock(),
+                form_id=1,
+            )
+
+        mock_current_run.log_error.assert_called_once()
+        mock_replace.assert_not_called()
