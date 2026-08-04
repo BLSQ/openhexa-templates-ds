@@ -10,6 +10,8 @@ This OpenHEXA pipeline (`iaso_import_submissions`) imports, updates and deletes 
 
 The pipeline builds OpenRosa-compliant XML payloads, enriches them with instance/user metadata, and uploads them through IASO's `/api/instances` and `/sync/form_upload/` / Enketo edit endpoints.
 
+The generated XML mirrors the form's structure (nested groups and repeat sections are preserved, not flattened), submitted values are XML-escaped, and select answers are validated against the choice **names** — including multilingual forms whose choices sheet only exposes `label::<language>` columns.
+
 ## Example Usage
 1. Select an IASO connection, project and form.
 2. Upload a submissions file exported from another system or prepared manually.
@@ -111,3 +113,7 @@ flowchart TD
 | XML upload fails (status ≠ 201) | Invalid XML or server error | Inspect generated XML file; validate namespaces & instanceID |
 | Missing namespaces in edited XML | ElementTree stripped unused prefixes | Function re-injects `xmlns:jr` & `xmlns:orx` automatically |
 | Wrong UUID in update | `instanceID` missing `uuid:` prefix | Prefix handled; ensure raw value present |
+| `"label" not found` while processing a record | Multilingual XLSForm whose choices sheet has `label::<language>` columns (no bare `label`) | Fixed: choices are now validated against the choice `name` column and the resolved list name; upgrade to this version |
+| Broken XML from free-text answers | Values containing `&`, `<`, `>`, `"` were not escaped | Fixed: submitted values are XML-escaped at render time |
+| Coordinates land at (0, 0) | Null latitude/longitude were coerced to `0.0` | Fixed: missing coordinates stay `null` |
+| Collection date lost on CREATE | `created_at` from the file was ignored | Fixed: `created_at` is honoured when present (UTC now otherwise) |

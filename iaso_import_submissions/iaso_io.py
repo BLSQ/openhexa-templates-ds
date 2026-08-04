@@ -25,7 +25,7 @@ def read_submissions_file(file_path: Path) -> pl.DataFrame:
 
     current_run.log_info(f"📁 Reading submissions file: {file_path}")
 
-    try:
+    try:  # ruff:ignore[too-many-statements-in-try-clause]
         file_readers = {
             ".csv": lambda fp: pl.read_csv(
                 fp,

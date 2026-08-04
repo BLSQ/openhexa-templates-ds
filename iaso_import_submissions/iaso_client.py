@@ -2,6 +2,7 @@ import base64
 import json
 from functools import lru_cache
 from io import BytesIO
+from urllib.parse import urlparse
 
 import pandas as pd
 import polars as pl
@@ -95,7 +96,7 @@ def get_form_metadata(
     Returns:
         pl.DataFrame: DataFrame containing form metadata.
     """
-    try:
+    try:  # ruff:ignore[too-many-statements-in-try-clause]
         if form_version:
             params = {
                 "form_id": str(form_id),
@@ -123,15 +124,20 @@ def get_form_metadata(
     if type_metadata not in ("questions", "choices"):
         raise ValueError("type_metadata must be 'questions' or 'choices'")
 
-    try:
+    try:  # ruff:ignore[too-many-statements-in-try-clause]
         resp = requests.get(xls_url, timeout=30)
         resp.raise_for_status()
         bio = BytesIO(resp.content)
-        df_pd = (
-            pd.read_excel(bio, dtype=str)
-            if type_metadata == "questions"
-            else pd.read_excel(bio, sheet_name="choices", dtype=str)
-        )
+        if type_metadata == "questions":
+            # The survey sheet is the questions definition; fall back to the first
+            # sheet only if a form does not name it "survey".
+            try:
+                df_pd = pd.read_excel(bio, sheet_name="survey", dtype=str)
+            except (ValueError, KeyError):
+                bio.seek(0)
+                df_pd = pd.read_excel(bio, dtype=str)
+        else:
+            df_pd = pd.read_excel(bio, sheet_name="choices", dtype=str)
         df_pd = df_pd.dropna(how="all")
         df_pl = pl.from_pandas(df_pd)
 
@@ -221,6 +227,7 @@ def get_token_headers(iaso: IASO) -> dict[str, str]:
     Returns:
         dict[str, str]: Authorization header mapping.
     """
+    token_res = None
     try:
         token_res = iaso.api_client.post(
             "/api/token/",
@@ -229,11 +236,13 @@ def get_token_headers(iaso: IASO) -> dict[str, str]:
         token_res.raise_for_status()
         token = token_res.json().get("access")
     except requests.RequestException as exc:
-        msg = f"Failed to obtain access token (network): {exc} - response: {token_res.text}"
+        resp_text = getattr(token_res, "text", None)
+        msg = f"Failed to obtain access token (network): {exc} - response: {resp_text}"
         current_run.log_error(msg)
         raise
     except json.JSONDecodeError as exc:
-        msg = f"Failed to parse token response JSON: {exc} - response: {token_res.text}"
+        resp_text = getattr(token_res, "text", None)
+        msg = f"Failed to parse token response JSON: {exc} - response: {resp_text}"
         current_run.log_error(msg)
         raise
 
@@ -281,3 +290,27 @@ def get_user_id_from_jwt(token: str) -> str:
     payload = base64.urlsafe_b64decode(payload_b64)
     payload = json.loads(payload)
     return payload.get("user_id", "") or payload.get("id", "") or payload.get("sub", "")
+
+
+def same_host(iaso: IASO, netloc: str) -> bool:
+    """Return whether a network location matches the IASO server host.
+
+    Used to decide if the IASO bearer token may be forwarded to a submission
+    endpoint. When the IASO host cannot be determined, the previous behaviour
+    (forwarding the token) is preserved to avoid breaking existing setups.
+
+    Args:
+        iaso (IASO): The authenticated IASO client.
+        netloc (str): The target host (``host:port``) to compare against.
+
+    Returns:
+        bool: True if hosts match or the IASO host is unknown.
+    """
+    base_url = ""
+    for attr in ("server_url", "url", "base_url"):
+        base_url = str(getattr(iaso.api_client, attr, "") or "")
+        if base_url:
+            break
+    if not base_url:
+        return True
+    return urlparse(base_url).netloc == netloc
